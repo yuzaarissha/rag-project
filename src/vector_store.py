@@ -14,35 +14,91 @@ import hashlib
 
 
 class VectorStore:
-    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db"):
+    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "nomic-embed-text:latest"):
         """
         Initialize ChromaDB vector store
         
         Args:
             collection_name: Name of the collection
             persist_directory: Directory to persist the database
+            embedding_model: Name of the embedding model to use
         """
-        self.collection_name = collection_name
-        self.persist_directory = persist_directory
+        self.base_collection_name = collection_name
+        # Use absolute path
+        self.persist_directory = os.path.abspath(persist_directory)
+        self.embedding_model = embedding_model
         
         # Create directory if it doesn't exist
-        os.makedirs(persist_directory, exist_ok=True)
+        os.makedirs(self.persist_directory, exist_ok=True)
+        
+        # Ensure write permissions
+        if os.path.exists(self.persist_directory):
+            os.chmod(self.persist_directory, 0o755)
         
         # Initialize ChromaDB client
         self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            path=self.persist_directory,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+                is_persistent=True
+            )
         )
+        
+        # Create model-specific collection name
+        self.collection_name = self._get_collection_name_for_model(embedding_model)
         
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"}
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine", "embedding_model": embedding_model}
         )
+    
+    def _get_collection_name_for_model(self, model_name: str) -> str:
+        """Generate collection name specific to embedding model."""
+        # Create a safe collection name based on the model
+        model_hash = hashlib.md5(model_name.encode()).hexdigest()[:8]
+        return f"{self.base_collection_name}_{model_hash}"
+    
+    def update_embedding_model(self, model_name: str) -> bool:
+        """
+        Update the embedding model being used
+        
+        Args:
+            model_name: New embedding model name
+            
+        Returns:
+            True if model was updated successfully, False otherwise
+        """
+        try:
+            # Test if the new model is available by generating a test embedding
+            test_response = ollama.embeddings(
+                model=model_name,
+                prompt="test"
+            )
+            
+            if 'embedding' in test_response and test_response['embedding']:
+                self.embedding_model = model_name
+                
+                # Switch to new collection for this model
+                self.collection_name = self._get_collection_name_for_model(model_name)
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    metadata={"hnsw:space": "cosine", "embedding_model": model_name}
+                )
+                
+                return True
+            else:
+                st.error(f"Failed to test embedding model {model_name}")
+                return False
+                
+        except Exception as e:
+            st.error(f"Failed to update embedding model to {model_name}: {str(e)}")
+            return False
     
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
-        Generate embeddings using Ollama nomic-embed-text
+        Generate embeddings using Ollama embedding model
         
         Args:
             texts: List of texts to embed
@@ -61,7 +117,7 @@ class VectorStore:
             for i, text in enumerate(texts):
                 try:
                     response = ollama.embeddings(
-                        model="nomic-embed-text:latest",
+                        model=self.embedding_model,
                         prompt=text
                     )
                     

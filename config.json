@@ -1,0 +1,4 @@
+{
+  "llm_model": "llama3.2:latest",
+  "embedding_model": "nomic-embed-text:latest"
+}

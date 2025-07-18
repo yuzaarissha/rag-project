@@ -74,8 +74,8 @@ if page == "🏠 Главная":
     - **Локальная обработка** - работа без интернета через Ollama
     
     ## 🛠️ Технологический стек:
-    - **LLM**: Llama 3.2 (через Ollama)
-    - **Embeddings**: nomic-embed-text
+    - **LLM**: Dynamic selection from Ollama
+    - **Embeddings**: Dynamic selection from Ollama
     - **Vector DB**: ChromaDB
     - **Interface**: Streamlit
     """)
@@ -388,6 +388,74 @@ elif page == "⚙️ Настройки":
         with tab1:
             st.subheader("Параметры RAG системы")
             
+            # Model selection
+            st.markdown("### 🤖 Выбор моделей Ollama")
+            
+            # Get available models
+            available_models = st.session_state.rag_pipeline.config_manager.get_available_models()
+            current_config = st.session_state.rag_pipeline.config_manager.get_current_config()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🧠 Модель LLM")
+                if available_models['llm']:
+                    current_llm_index = 0
+                    if current_config.llm_model in available_models['llm']:
+                        current_llm_index = available_models['llm'].index(current_config.llm_model)
+                    
+                    selected_llm = st.selectbox(
+                        "Выберите LLM модель",
+                        available_models['llm'],
+                        index=current_llm_index,
+                        key="llm_model_select"
+                    )
+                    
+                    if selected_llm != current_config.llm_model:
+                        if st.button("Применить LLM модель", key="apply_llm"):
+                            if st.session_state.rag_pipeline.update_models(llm_model=selected_llm):
+                                st.rerun()
+                else:
+                    st.warning("❌ Не найдено доступных LLM моделей")
+                    st.info("Установите LLM модель: ollama pull <model_name>")
+            
+            with col2:
+                st.markdown("#### 🔢 Модель Embedding")
+                if available_models['embedding']:
+                    current_embed_index = 0
+                    if current_config.embedding_model in available_models['embedding']:
+                        current_embed_index = available_models['embedding'].index(current_config.embedding_model)
+                    
+                    selected_embedding = st.selectbox(
+                        "Выберите Embedding модель",
+                        available_models['embedding'],
+                        index=current_embed_index,
+                        key="embedding_model_select"
+                    )
+                    
+                    if selected_embedding != current_config.embedding_model:
+                        if st.button("Применить Embedding модель", key="apply_embedding"):
+                            if st.session_state.rag_pipeline.update_models(embedding_model=selected_embedding):
+                                st.rerun()
+                else:
+                    st.warning("❌ Не найдено доступных Embedding моделей")
+                    st.info("Установите Embedding модель: ollama pull <model_name>")
+            
+            # Current model info
+            st.markdown("#### 📊 Текущие модели")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info(f"**LLM:** {current_config.llm_model}")
+            
+            with col2:
+                st.info(f"**Embedding:** {current_config.embedding_model}")
+            
+            if st.button("🔄 Обновить список моделей", key="refresh_models"):
+                st.rerun()
+            
+            st.markdown("---")
+            
             # Router settings
             st.markdown("### 🧭 Настройки маршрутизатора")
             
@@ -493,6 +561,65 @@ elif page == "⚙️ Настройки":
             
             # System status
             status = st.session_state.rag_pipeline.get_system_status()
+            
+            # Model configuration info
+            st.markdown("### 🤖 Конфигурация моделей")
+            current_config = st.session_state.rag_pipeline.config_manager.get_current_config()
+            available_models = st.session_state.rag_pipeline.config_manager.get_available_models()
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 🧠 LLM Модель")
+                llm_info = st.session_state.rag_pipeline.config_manager.get_model_info(current_config.llm_model)
+                if llm_info:
+                    model_data = {
+                        "Название": llm_info.get('name', 'N/A'),
+                        "Размер": llm_info.get('size', 'N/A'),
+                        "Изменено": llm_info.get('modified_at', 'N/A'),
+                        "Статус": "✅ Доступна" if current_config.llm_model in available_models['llm'] else "❌ Недоступна"
+                    }
+                    st.json(model_data)
+                else:
+                    st.error("❌ Информация о модели недоступна")
+            
+            with col2:
+                st.markdown("#### 🔢 Embedding Модель")
+                embed_info = st.session_state.rag_pipeline.config_manager.get_model_info(current_config.embedding_model)
+                if embed_info:
+                    model_data = {
+                        "Название": embed_info.get('name', 'N/A'),
+                        "Размер": embed_info.get('size', 'N/A'),
+                        "Изменено": embed_info.get('modified_at', 'N/A'),
+                        "Статус": "✅ Доступна" if current_config.embedding_model in available_models['embedding'] else "❌ Недоступна"
+                    }
+                    st.json(model_data)
+                else:
+                    st.error("❌ Информация о модели недоступна")
+            
+            # Summary of available models
+            st.markdown("#### 📊 Доступные модели")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("LLM модели", len(available_models['llm']))
+                if available_models['llm']:
+                    st.write("📝 Список:")
+                    for model in available_models['llm'][:5]:  # Show first 5
+                        st.write(f"  • {model}")
+                    if len(available_models['llm']) > 5:
+                        st.write(f"  ... и еще {len(available_models['llm']) - 5}")
+            
+            with col2:
+                st.metric("Embedding модели", len(available_models['embedding']))
+                if available_models['embedding']:
+                    st.write("📝 Список:")
+                    for model in available_models['embedding'][:5]:  # Show first 5
+                        st.write(f"  • {model}")
+                    if len(available_models['embedding']) > 5:
+                        st.write(f"  ... и еще {len(available_models['embedding']) - 5}")
+            
+            st.markdown("---")
             
             st.markdown("### 💾 Векторная база данных")
             st.json(status["vector_store"])

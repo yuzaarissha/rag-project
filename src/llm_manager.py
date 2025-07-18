@@ -27,6 +27,31 @@ class LLMManager:
         5. Будьте точными и краткими
         6. Если вопрос неясен, попросите уточнения"""
     
+    def update_model(self, model_name: str) -> bool:
+        """
+        Update the model being used
+        
+        Args:
+            model_name: New model name
+            
+        Returns:
+            True if model was updated successfully, False otherwise
+        """
+        try:
+            # Test if the new model is available
+            test_response = ollama.generate(
+                model=model_name,
+                prompt="test",
+                options={"num_predict": 1}
+            )
+            
+            self.model_name = model_name
+            return True
+            
+        except Exception as e:
+            st.error(f"Failed to update model to {model_name}: {str(e)}")
+            return False
+    
     def check_model_availability(self) -> bool:
         """
         Check if the model is available
@@ -299,6 +324,6 @@ class LLMManager:
             st.error(f"Connection test failed: {str(e)}")
             st.info("Убедитесь, что:")
             st.info("1. Ollama запущен: ollama serve")
-            st.info("2. Модель загружена: ollama pull llama3.2:latest")
+            st.info("2. Модель загружена: ollama pull <model_name>")
             st.info("3. Модель доступна: ollama list")
             return False

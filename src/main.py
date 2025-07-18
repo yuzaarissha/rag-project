@@ -10,14 +10,18 @@ from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
 from .llm_manager import LLMManager
 from .router import SmartRouter
+from .config import ConfigManager
 
 
 class RAGPipeline:
     def __init__(self):
         """Initialize RAG Pipeline with all components"""
+        self.config_manager = ConfigManager()
+        config = self.config_manager.get_current_config()
+        
         self.document_processor = DocumentProcessor(chunk_size=1000, chunk_overlap=100)
-        self.vector_store = VectorStore()
-        self.llm_manager = LLMManager()
+        self.vector_store = VectorStore(embedding_model=config.embedding_model)
+        self.llm_manager = LLMManager(model_name=config.llm_model)
         self.router = SmartRouter(self.llm_manager, self.vector_store)
         
         # Pipeline statistics
@@ -28,6 +32,45 @@ class RAGPipeline:
             "average_response_time": 0.0,
             "total_documents": 0
         }
+    
+    def update_models(self, llm_model: str = None, embedding_model: str = None) -> bool:
+        """
+        Update the models used by the RAG pipeline
+        
+        Args:
+            llm_model: New LLM model name (optional)
+            embedding_model: New embedding model name (optional)
+            
+        Returns:
+            True if all updates were successful, False otherwise
+        """
+        success = True
+        
+        if llm_model:
+            if self.config_manager.update_llm_model(llm_model):
+                if self.llm_manager.update_model(llm_model):
+                    st.success(f"✅ LLM модель обновлена: {llm_model}")
+                else:
+                    st.error(f"❌ Не удалось обновить LLM модель: {llm_model}")
+                    success = False
+            else:
+                st.error(f"❌ Модель {llm_model} недоступна")
+                success = False
+        
+        if embedding_model:
+            if self.config_manager.update_embedding_model(embedding_model):
+                if self.vector_store.update_embedding_model(embedding_model):
+                    st.success(f"✅ Embedding модель обновлена: {embedding_model}")
+                    st.info("ℹ️ Создана новая коллекция для этой модели")
+                    st.warning("⚠️ Необходимо переиндексировать документы для новой модели")
+                else:
+                    st.error(f"❌ Не удалось обновить embedding модель: {embedding_model}")
+                    success = False
+            else:
+                st.error(f"❌ Embedding модель {embedding_model} недоступна")
+                success = False
+        
+        return success
     
     def initialize_system(self) -> bool:
         """
@@ -55,40 +98,40 @@ class RAGPipeline:
                 st.warning(f"⚠️ Не удалось проверить статус Ollama: {e}")
             
             # Test LLM model directly
-            st.info("Тестирование модели LLM...")
+            st.info(f"Тестирование модели LLM ({self.llm_manager.model_name})...")
             try:
                 import ollama
                 test_response = ollama.generate(
-                    model="llama3.2:latest",
+                    model=self.llm_manager.model_name,
                     prompt="test",
                     options={"num_predict": 1}
                 )
                 if test_response and 'response' in test_response:
-                    st.success("✅ Модель LLM (llama3.2:latest) работает")
+                    st.success(f"✅ Модель LLM ({self.llm_manager.model_name}) работает")
                 else:
                     st.error("❌ Модель LLM не отвечает корректно")
                     return False
             except Exception as e:
                 st.error(f"❌ Ошибка тестирования LLM модели: {e}")
-                st.info("Убедитесь, что модель установлена: ollama pull llama3.2:latest")
+                st.info(f"Убедитесь, что модель установлена: ollama pull {self.llm_manager.model_name}")
                 return False
             
             # Test embedding model
-            st.info("Тестирование модели эмбеддингов...")
+            st.info(f"Тестирование модели эмбеддингов ({self.vector_store.embedding_model})...")
             try:
                 import ollama
                 test_response = ollama.embeddings(
-                    model="nomic-embed-text:latest",
+                    model=self.vector_store.embedding_model,
                     prompt="test"
                 )
                 if 'embedding' in test_response and test_response['embedding']:
-                    st.success("✅ Модель эмбеддингов (nomic-embed-text:latest) работает")
+                    st.success(f"✅ Модель эмбеддингов ({self.vector_store.embedding_model}) работает")
                 else:
                     st.error("❌ Модель эмбеддингов не возвращает векторы")
                     return False
             except Exception as e:
                 st.error(f"❌ Ошибка тестирования модели эмбеддингов: {e}")
-                st.info("Убедитесь, что модель установлена: ollama pull nomic-embed-text:latest")
+                st.info(f"Убедитесь, что модель установлена: ollama pull {self.vector_store.embedding_model}")
                 return False
             
             # Check vector store
