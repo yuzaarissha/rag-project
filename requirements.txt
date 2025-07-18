@@ -1,0 +1,13 @@
+streamlit
+langchain
+langchain-community
+chromadb
+ollama
+PyMuPDF
+sentence-transformers
+python-dotenv
+numpy
+pandas
+tiktoken
+typing-extensions
+requests

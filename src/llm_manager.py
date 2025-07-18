@@ -1,0 +1,304 @@
+"""
+LLM Manager for handling Ollama interactions
+Manages model communication and response generation
+"""
+
+import ollama
+import streamlit as st
+from typing import Dict, Any, Optional, List
+import json
+
+
+class LLMManager:
+    def __init__(self, model_name: str = "llama3.2:latest"):
+        """
+        Initialize LLM Manager
+        
+        Args:
+            model_name: Name of the Ollama model to use
+        """
+        self.model_name = model_name
+        self.system_prompt = """Вы являетесь полезным помощником для ответов на вопросы на основе предоставленного контекста. 
+        Используйте следующие принципы:
+        1. Отвечайте только на основе предоставленного контекста
+        2. Если контекст не содержит достаточной информации, четко об этом сообщите
+        3. Поддерживайте дружелюбный и профессиональный тон
+        4. Отвечайте на русском или казахском языке в зависимости от вопроса
+        5. Будьте точными и краткими
+        6. Если вопрос неясен, попросите уточнения"""
+    
+    def check_model_availability(self) -> bool:
+        """
+        Check if the model is available
+        
+        Returns:
+            True if model is available, False otherwise
+        """
+        try:
+            # Try to list models
+            models_response = ollama.list()
+            
+            # Extract model names from response
+            available_models = []
+            
+            if isinstance(models_response, dict) and 'models' in models_response:
+                for model in models_response['models']:
+                    if isinstance(model, dict) and 'name' in model:
+                        available_models.append(model['name'])
+            
+            st.info(f"Доступные модели: {available_models}")
+            
+            # Check if our model is available
+            is_available = self.model_name in available_models
+            
+            if not is_available:
+                st.warning(f"Модель {self.model_name} не найдена в списке доступных моделей")
+                st.info("Попробуйте использовать точное название из 'ollama list'")
+            
+            return is_available
+            
+        except Exception as e:
+            st.error(f"Ошибка проверки доступности моделей: {str(e)}")
+            # Fallback: try to use the model directly
+            try:
+                test_response = ollama.generate(
+                    model=self.model_name,
+                    prompt="test",
+                    options={"num_predict": 1}
+                )
+                st.success(f"Модель {self.model_name} работает (прямое тестирование)")
+                return True
+            except Exception as test_error:
+                st.error(f"Модель {self.model_name} недоступна: {test_error}")
+                return False
+    
+    def generate_response(self, prompt: str, context: str = "", temperature: float = 0.1) -> str:
+        """
+        Generate response using Ollama
+        
+        Args:
+            prompt: User question
+            context: Retrieved context
+            temperature: Response randomness
+            
+        Returns:
+            Generated response
+        """
+        try:
+            # Build the full prompt
+            if context:
+                full_prompt = f"""Контекст: {context}
+
+Вопрос: {prompt}
+
+Ответ:"""
+            else:
+                full_prompt = prompt
+            
+            # Generate response
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=full_prompt,
+                system=self.system_prompt,
+                options={
+                    "temperature": temperature,
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "num_predict": 500
+                }
+            )
+            
+            return response['response'].strip()
+            
+        except Exception as e:
+            st.error(f"Error generating response: {str(e)}")
+            return "Извините, произошла ошибка при генерации ответа."
+    
+    def generate_router_decision(self, query: str, context: str) -> bool:
+        """
+        Generate router decision - can we answer from local context?
+        
+        Args:
+            query: User question
+            context: Available context
+            
+        Returns:
+            True if can answer locally, False otherwise
+        """
+        try:
+            router_prompt = f"""Роль: Системный маршрутизатор
+Задача: Определить, может ли система ответить на вопрос пользователя на основе предоставленного текста.
+
+Инструкции:
+- Проанализируйте текст и определите, содержит ли он необходимую информацию для ответа на вопрос пользователя
+- Дайте четкий ответ: может ли система ответить на вопрос или нет
+- Ваш ответ должен содержать только одно слово: "Да" или "Нет"
+
+Примеры:
+Текст: "Столица Франции - Париж."
+Вопрос: "Какая столица Франции?"
+Ответ: Да
+
+Текст: "Население США составляет более 330 миллионов человек."
+Вопрос: "Какое население Китая?"
+Ответ: Нет
+
+Текст: {context}
+Вопрос: {query}
+Ответ:"""
+            
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=router_prompt,
+                options={
+                    "temperature": 0.0,
+                    "top_p": 0.1,
+                    "num_predict": 10
+                }
+            )
+            
+            answer = response['response'].strip().lower()
+            return answer in ["да", "yes", "true", "1"]
+            
+        except Exception as e:
+            st.error(f"Error in router decision: {str(e)}")
+            return False
+    
+    def summarize_context(self, context: str, max_length: int = 1000) -> str:
+        """
+        Summarize context if it's too long
+        
+        Args:
+            context: Context to summarize
+            max_length: Maximum length of summary
+            
+        Returns:
+            Summarized context
+        """
+        if len(context) <= max_length:
+            return context
+        
+        try:
+            summary_prompt = f"""Задача: Кратко изложить основные моменты из следующего текста.
+Требования:
+- Сохранить ключевую информацию
+- Убрать повторения
+- Максимальная длина: {max_length} символов
+- Язык ответа: такой же, как в исходном тексте
+
+Текст:
+{context}
+
+Краткое изложение:"""
+            
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=summary_prompt,
+                options={
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "num_predict": max_length // 4
+                }
+            )
+            
+            return response['response'].strip()
+            
+        except Exception as e:
+            st.error(f"Error summarizing context: {str(e)}")
+            return context[:max_length] + "..."
+    
+    def extract_key_topics(self, text: str) -> List[str]:
+        """
+        Extract key topics from text
+        
+        Args:
+            text: Text to analyze
+            
+        Returns:
+            List of key topics
+        """
+        try:
+            topics_prompt = f"""Задача: Извлечь ключевые темы из следующего текста.
+Требования:
+- Выделить 5-10 основных тем
+- Каждая тема должна быть 1-3 слова
+- Ответ в формате: тема1, тема2, тема3...
+
+Текст:
+{text}
+
+Ключевые темы:"""
+            
+            response = ollama.generate(
+                model=self.model_name,
+                prompt=topics_prompt,
+                options={
+                    "temperature": 0.2,
+                    "top_p": 0.8,
+                    "num_predict": 100
+                }
+            )
+            
+            topics_text = response['response'].strip()
+            topics = [topic.strip() for topic in topics_text.split(',')]
+            return topics[:10]  # Limit to 10 topics
+            
+        except Exception as e:
+            st.error(f"Error extracting topics: {str(e)}")
+            return []
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """
+        Get information about the current model
+        
+        Returns:
+            Model information
+        """
+        try:
+            models_response = ollama.list()
+            
+            if isinstance(models_response, dict) and 'models' in models_response:
+                for model in models_response['models']:
+                    if isinstance(model, dict) and model.get('name') == self.model_name:
+                        return {
+                            "name": model.get('name'),
+                            "size": model.get('size', 'Unknown'),
+                            "modified": model.get('modified_at', 'Unknown'),
+                            "available": True
+                        }
+            
+            return {
+                "name": self.model_name,
+                "available": False,
+                "error": "Model not found in available models"
+            }
+            
+        except Exception as e:
+            return {
+                "name": self.model_name, 
+                "available": False,
+                "error": str(e)
+            }
+    
+    def test_connection(self) -> bool:
+        """
+        Test connection to Ollama
+        
+        Returns:
+            True if connection successful, False otherwise
+        """
+        try:
+            # First try to connect to Ollama service
+            response = ollama.generate(
+                model=self.model_name,
+                prompt="Test",
+                options={"num_predict": 5}
+            )
+            return True
+        except Exception as e:
+            st.error(f"Connection test failed: {str(e)}")
+            st.info("Убедитесь, что:")
+            st.info("1. Ollama запущен: ollama serve")
+            st.info("2. Модель загружена: ollama pull llama3.2:latest")
+            st.info("3. Модель доступна: ollama list")
+            return False

@@ -1,0 +1,402 @@
+"""
+Main RAG Pipeline
+Orchestrates the entire RAG process
+"""
+
+from typing import Dict, Any, List, Optional
+import streamlit as st
+import time
+from .document_processor import DocumentProcessor
+from .vector_store import VectorStore
+from .llm_manager import LLMManager
+from .router import SmartRouter
+
+
+class RAGPipeline:
+    def __init__(self):
+        """Initialize RAG Pipeline with all components"""
+        self.document_processor = DocumentProcessor(chunk_size=1000, chunk_overlap=100)
+        self.vector_store = VectorStore()
+        self.llm_manager = LLMManager()
+        self.router = SmartRouter(self.llm_manager, self.vector_store)
+        
+        # Pipeline statistics
+        self.stats = {
+            "total_queries": 0,
+            "successful_answers": 0,
+            "failed_answers": 0,
+            "average_response_time": 0.0,
+            "total_documents": 0
+        }
+    
+    def initialize_system(self) -> bool:
+        """
+        Initialize and check all system components
+        
+        Returns:
+            True if all components are ready, False otherwise
+        """
+        try:
+            st.info("Проверка системных компонентов...")
+            
+            # Check Ollama service first
+            try:
+                import requests
+                response = requests.get("http://localhost:11434/api/version", timeout=5)
+                if response.status_code != 200:
+                    st.error("❌ Ollama сервис недоступен. Запустите: ollama serve")
+                    return False
+                else:
+                    st.success("✅ Ollama сервис запущен")
+            except requests.exceptions.ConnectionError:
+                st.error("❌ Ollama сервис не запущен. Запустите: ollama serve")
+                return False
+            except Exception as e:
+                st.warning(f"⚠️ Не удалось проверить статус Ollama: {e}")
+            
+            # Test LLM model directly
+            st.info("Тестирование модели LLM...")
+            try:
+                import ollama
+                test_response = ollama.generate(
+                    model="llama3.2:latest",
+                    prompt="test",
+                    options={"num_predict": 1}
+                )
+                if test_response and 'response' in test_response:
+                    st.success("✅ Модель LLM (llama3.2:latest) работает")
+                else:
+                    st.error("❌ Модель LLM не отвечает корректно")
+                    return False
+            except Exception as e:
+                st.error(f"❌ Ошибка тестирования LLM модели: {e}")
+                st.info("Убедитесь, что модель установлена: ollama pull llama3.2:latest")
+                return False
+            
+            # Test embedding model
+            st.info("Тестирование модели эмбеддингов...")
+            try:
+                import ollama
+                test_response = ollama.embeddings(
+                    model="nomic-embed-text:latest",
+                    prompt="test"
+                )
+                if 'embedding' in test_response and test_response['embedding']:
+                    st.success("✅ Модель эмбеддингов (nomic-embed-text:latest) работает")
+                else:
+                    st.error("❌ Модель эмбеддингов не возвращает векторы")
+                    return False
+            except Exception as e:
+                st.error(f"❌ Ошибка тестирования модели эмбеддингов: {e}")
+                st.info("Убедитесь, что модель установлена: ollama pull nomic-embed-text:latest")
+                return False
+            
+            # Check vector store
+            collection_info = self.vector_store.get_collection_info()
+            if collection_info.get("document_count", 0) == 0:
+                st.warning("⚠️ Векторная база пуста. Загрузите документы для начала работы.")
+            else:
+                st.info(f"📚 Загружено {collection_info.get('document_count', 0)} документов")
+            
+            st.success("✅ Все компоненты системы готовы к работе!")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка инициализации системы: {str(e)}")
+            return False
+    
+    def load_documents_from_directory(self, directory_path: str) -> bool:
+        """
+        Load and process documents from directory
+        
+        Args:
+            directory_path: Path to directory with PDF files
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            st.info("Загрузка документов...")
+            
+            # Process documents
+            documents = self.document_processor.process_pdf_directory(directory_path)
+            
+            if not documents:
+                st.error("Не удалось обработать документы")
+                return False
+            
+            # Add to vector store
+            success = self.vector_store.add_documents(documents)
+            
+            if success:
+                self.stats["total_documents"] = len(documents)
+                st.success(f"Успешно загружено {len(documents)} фрагментов документов")
+                return True
+            else:
+                st.error("Не удалось добавить документы в векторную базу")
+                return False
+                
+        except Exception as e:
+            st.error(f"Ошибка загрузки документов: {str(e)}")
+            return False
+    
+    def load_uploaded_file(self, uploaded_file) -> bool:
+        """
+        Load and process uploaded file
+        
+        Args:
+            uploaded_file: Streamlit uploaded file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            st.info(f"Обработка файла: {uploaded_file.name}")
+            
+            # Process document
+            documents = self.document_processor.process_uploaded_file(uploaded_file)
+            
+            if not documents:
+                st.error("Не удалось обработать файл")
+                return False
+            
+            # Add to vector store
+            success = self.vector_store.add_documents(documents)
+            
+            if success:
+                self.stats["total_documents"] += len(documents)
+                st.success(f"Файл обработан: {len(documents)} фрагментов добавлено")
+                return True
+            else:
+                st.error("Не удалось добавить документы в векторную базу")
+                return False
+                
+        except Exception as e:
+            st.error(f"Ошибка обработки файла: {str(e)}")
+            return False
+    
+    def process_query(self, query: str, show_debug: bool = False) -> Dict[str, Any]:
+        """
+        Process user query through the complete RAG pipeline
+        
+        Args:
+            query: User question
+            show_debug: Whether to show debug information
+            
+        Returns:
+            Complete response with metadata
+        """
+        start_time = time.time()
+        
+        try:
+            # Step 1: Search for relevant documents
+            search_results = self.vector_store.search_similar(query, k=5)
+            
+            # Step 2: Route the query
+            routing_result = self.router.route_query(query, search_results)
+            
+            # Step 3: Generate response
+            if routing_result["can_answer"]:
+                # Enhance context
+                enhanced_context = self.router.enhance_context(
+                    routing_result["context"], 
+                    query
+                )
+                
+                # Generate answer
+                answer = self.llm_manager.generate_response(
+                    prompt=query,
+                    context=enhanced_context,
+                    temperature=0.1
+                )
+                
+                response_type = "success"
+                self.stats["successful_answers"] += 1
+                
+            else:
+                # Cannot answer from local knowledge
+                answer = self._generate_fallback_response(query, routing_result)
+                response_type = "fallback"
+                self.stats["failed_answers"] += 1
+            
+            # Calculate response time
+            response_time = time.time() - start_time
+            self.stats["total_queries"] += 1
+            self.stats["average_response_time"] = (
+                (self.stats["average_response_time"] * (self.stats["total_queries"] - 1) + response_time) 
+                / self.stats["total_queries"]
+            )
+            
+            # Show debug info during processing only if debug mode is on
+            if show_debug:
+                st.info("🔍 Процесс обработки:")
+                st.write(f"📚 Найдено {len(search_results)} релевантных документов")
+                st.write("🧭 Результат маршрутизации:")
+                st.write(self.router.explain_routing_decision(routing_result))
+            
+            # Prepare complete response
+            complete_response = {
+                "answer": answer,
+                "response_type": response_type,
+                "response_time": response_time,
+                "routing_result": routing_result,
+                "search_results": search_results,
+                "query_analysis": routing_result.get("query_analysis", {}),
+                "sources": self._extract_sources(search_results)
+            }
+            
+            return complete_response
+            
+        except Exception as e:
+            st.error(f"Ошибка обработки запроса: {str(e)}")
+            return {
+                "answer": "Извините, произошла ошибка при обработке вашего запроса.",
+                "response_type": "error",
+                "error": str(e)
+            }
+    
+    def _generate_fallback_response(self, query: str, routing_result: Dict[str, Any]) -> str:
+        """
+        Generate fallback response when local knowledge is insufficient
+        
+        Args:
+            query: User question
+            routing_result: Result from router
+            
+        Returns:
+            Fallback response
+        """
+        language = routing_result.get("query_analysis", {}).get("language", "russian")
+        confidence = routing_result.get("confidence", 0.0)
+        
+        if language == "kazakh":
+            return f"""Кешіріңіз, жүктелген құжаттарда сіздің сұрағыңызға толық жауап беру үшін жеткілікті ақпарат жоқ (сенімділік: {confidence:.2f}).
+
+Мүмкін:
+1. Сұрақты басқаша тұжырымдау
+2. Қосымша құжаттар жүктеу
+3. Неғұрлым нақты сұрақ қою
+
+Табылған ақпарат негізінде ішінара жауап беруге тырысайын..."""
+        elif language == "russian":
+            return f"""Извините, в загруженных документах недостаточно информации для полного ответа на ваш вопрос (уверенность: {confidence:.2f}).
+
+Возможные варианты:
+1. Переформулировать вопрос
+2. Загрузить дополнительные документы
+3. Задать более конкретный вопрос
+
+Попробую дать частичный ответ на основе найденной информации..."""
+        else:
+            return f"""Sorry, there's insufficient information in the loaded documents to fully answer your question (confidence: {confidence:.2f}).
+
+Possible options:
+1. Rephrase the question
+2. Upload additional documents
+3. Ask a more specific question
+
+I'll try to provide a partial answer based on the available information..."""
+    
+    def _extract_sources(self, search_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Extract source information from search results
+        
+        Args:
+            search_results: Search results from vector store
+            
+        Returns:
+            List of source information
+        """
+        sources = []
+        seen_files = set()
+        
+        for result in search_results:
+            metadata = result.get("metadata", {})
+            filename = metadata.get("filename", "Unknown")
+            
+            if filename not in seen_files:
+                sources.append({
+                    "filename": filename,
+                    "page_count": metadata.get("page_count", "Unknown"),
+                    "relevance": 1 - result.get("distance", 1.0)
+                })
+                seen_files.add(filename)
+        
+        return sources
+    
+    def get_system_status(self) -> Dict[str, Any]:
+        """
+        Get comprehensive system status
+        
+        Returns:
+            System status information
+        """
+        # Get vector store info
+        collection_info = self.vector_store.get_collection_info()
+        document_summary = self.vector_store.get_document_summary()
+        
+        # Get LLM info
+        llm_info = self.llm_manager.get_model_info()
+        
+        # Get router metrics
+        router_metrics = self.router.get_routing_metrics()
+        
+        return {
+            "vector_store": {
+                "total_documents": collection_info.get("document_count", 0),
+                "unique_files": document_summary.get("unique_files", 0),
+                "filenames": document_summary.get("filenames", [])
+            },
+            "llm": llm_info,
+            "router": router_metrics,
+            "pipeline_stats": self.stats.copy()
+        }
+    
+    def clear_all_data(self) -> bool:
+        """
+        Clear all data from the system
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            success = self.vector_store.clear_collection()
+            if success:
+                self.stats = {
+                    "total_queries": 0,
+                    "successful_answers": 0,
+                    "failed_answers": 0,
+                    "average_response_time": 0.0,
+                    "total_documents": 0
+                }
+            return success
+        except Exception as e:
+            st.error(f"Ошибка очистки данных: {str(e)}")
+            return False
+    
+    def export_conversation(self, conversation_history: List[Dict[str, Any]]) -> str:
+        """
+        Export conversation history
+        
+        Args:
+            conversation_history: List of conversation entries
+            
+        Returns:
+            Formatted conversation text
+        """
+        export_text = "# RAG System - История разговоров\n\n"
+        
+        for i, entry in enumerate(conversation_history, 1):
+            export_text += f"## Запрос {i}\n"
+            export_text += f"**Вопрос:** {entry.get('question', 'N/A')}\n\n"
+            export_text += f"**Ответ:** {entry.get('answer', 'N/A')}\n\n"
+            
+            if entry.get('sources'):
+                export_text += "**Источники:**\n"
+                for source in entry['sources']:
+                    export_text += f"- {source.get('filename', 'Unknown')}\n"
+                export_text += "\n"
+            
+            export_text += "---\n\n"
+        
+        return export_text
