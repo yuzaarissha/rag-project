@@ -74,8 +74,8 @@ if page == "🏠 Главная":
     - **Локальная обработка** - работа без интернета через Ollama
     
     ## 🛠️ Технологический стек:
-    - **LLM**: Dynamic selection from Ollama
-    - **Embeddings**: Dynamic selection from Ollama
+    - **LLM**: Автоматический выбор из доступных моделей Ollama
+    - **Embeddings**: Автоматический выбор из доступных моделей Ollama
     - **Vector DB**: ChromaDB
     - **Interface**: Streamlit
     """)
@@ -83,7 +83,15 @@ if page == "🏠 Главная":
     if not st.session_state.system_initialized:
         st.warning("⚠️ Система не инициализирована. Проверьте систему в боковой панели.")
     else:
+        # Show auto-detected models
+        config = st.session_state.rag_pipeline.config_manager.get_current_config()
         st.success("✅ Система готова к работе!")
+        st.info(f"🤖 **Используемые модели:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**LLM:** {config.llm_model}")
+        with col2:
+            st.write(f"**Embedding:** {config.embedding_model}")
         
         col1, col2 = st.columns(2)
         
@@ -235,9 +243,10 @@ elif page == "💬 Чат":
                 
                 # Display response - ANSWER FIRST
                 st.markdown("### 💡 Ответ:")
-                st.markdown(response["answer"])
+                st.info(response["answer"])
                 
                 # Technical information in expandable sections
+                st.markdown("#### 🔧 Дополнительная информация")
                 col1, col2 = st.columns(2)
                 
                 with col1:
@@ -269,11 +278,11 @@ elif page == "💬 Чат":
                 for i, entry in enumerate(st.session_state.conversation_history[:5]):  # Show last 5
                     with st.expander(f"💬 {entry['timestamp']} - {entry['question'][:50]}...", expanded=False):
                         st.markdown(f"**❓ Вопрос:** {entry['question']}")
-                        st.markdown("---")
-                        st.markdown(f"**💡 Ответ:** {entry['answer']}")
+                        st.markdown("**💡 Ответ:**")
+                        st.info(entry['answer'])
                         
                         # Technical details in smaller text
-                        st.markdown("---")
+                        st.markdown("**🔧 Дополнительная информация:**")
                         st.caption(f"⏱️ Время: {entry['response_time']:.2f}s | 🎯 Тип: {entry['response_type']}")
                         
                         if entry.get('sources'):
@@ -454,6 +463,14 @@ elif page == "⚙️ Настройки":
             if st.button("🔄 Обновить список моделей", key="refresh_models"):
                 st.rerun()
             
+            # Show install instructions
+            st.markdown("#### 💡 Добавить новые модели")
+            st.markdown("Для добавления новых моделей используйте:")
+            st.code("ollama pull <model_name>", language="bash")
+            st.markdown("**Популярные модели:**")
+            st.markdown("- **LLM:** `llama3.2:latest`, `deepseek-r1:latest`, `qwen2.5:latest`")
+            st.markdown("- **Embedding:** `nomic-embed-text:latest`, `mxbai-embed-large:latest`")
+            
             st.markdown("---")
             
             # Router settings
@@ -504,10 +521,36 @@ elif page == "⚙️ Настройки":
             search_k = st.number_input(
                 "Количество результатов поиска",
                 min_value=1,
-                max_value=10,
-                value=5,
+                max_value=20,
+                value=10,
                 help="Количество наиболее релевантных фрагментов для поиска"
             )
+            
+            # Advanced routing settings
+            st.markdown("#### 🎯 Расширенные настройки")
+            
+            with st.expander("Настройки уверенности", expanded=False):
+                st.info("Настройте, насколько уверенно система должна отвечать на вопросы")
+                
+                high_confidence_threshold = st.slider(
+                    "Порог высокой уверенности",
+                    min_value=0.1,
+                    max_value=1.0,
+                    value=0.5,
+                    step=0.1,
+                    help="При превышении этого порога система всегда пытается ответить"
+                )
+                
+                min_context_length = st.number_input(
+                    "Минимальная длина контекста",
+                    min_value=10,
+                    max_value=500,
+                    value=100,
+                    help="Минимальное количество символов контекста для попытки ответа"
+                )
+                
+                st.caption("💡 Более низкие значения = более агрессивная система (больше попыток ответить)")
+                st.caption("💡 Более высокие значения = более консервативная система (меньше ошибок)")
             
             # LLM settings
             st.markdown("### 🧠 Настройки LLM")

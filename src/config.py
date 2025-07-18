@@ -12,8 +12,8 @@ import ollama
 @dataclass
 class ModelConfig:
     """Configuration for model selection."""
-    llm_model: str = "llama3.2:latest"  # Default, will be auto-detected
-    embedding_model: str = "nomic-embed-text:latest"  # Default, will be auto-detected
+    llm_model: str = ""  # Will be auto-detected from available models
+    embedding_model: str = ""  # Will be auto-detected from available models
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -31,17 +31,48 @@ class ConfigManager:
         self.config = self._load_config()
     
     def _load_config(self) -> ModelConfig:
-        """Load configuration from file or create default."""
+        """Load configuration from file or create default with auto-detection."""
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                return ModelConfig.from_dict(data)
+                config = ModelConfig.from_dict(data)
+                # Validate that models are still available
+                if not self.is_model_available(config.llm_model) or not self.is_model_available(config.embedding_model):
+                    print("Saved models not available, auto-detecting...")
+                    return self._create_default_config()
+                return config
             except Exception as e:
                 print(f"Error loading config: {e}")
-                return ModelConfig()
+                return self._create_default_config()
         else:
-            return ModelConfig()
+            return self._create_default_config()
+    
+    def _create_default_config(self) -> ModelConfig:
+        """Create default configuration with auto-detected models."""
+        available_models = self.get_available_models()
+        
+        # Auto-select first available LLM model
+        llm_model = available_models['llm'][0] if available_models['llm'] else ""
+        
+        # Auto-select first available embedding model
+        embedding_model = available_models['embedding'][0] if available_models['embedding'] else ""
+        
+        config = ModelConfig(llm_model=llm_model, embedding_model=embedding_model)
+        
+        # Save the auto-detected config
+        if llm_model and embedding_model:
+            self.config = config
+            self.save_config()
+            print(f"Auto-detected models - LLM: {llm_model}, Embedding: {embedding_model}")
+        else:
+            print("❌ Could not auto-detect models:")
+            if not llm_model:
+                print("  - No LLM models found. Install one with: ollama pull <llm_model>")
+            if not embedding_model:
+                print("  - No embedding models found. Install one with: ollama pull <embedding_model>")
+        
+        return config
     
     def save_config(self) -> None:
         """Save current configuration to file."""

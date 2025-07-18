@@ -98,6 +98,11 @@ class RAGPipeline:
                 st.warning(f"⚠️ Не удалось проверить статус Ollama: {e}")
             
             # Test LLM model directly
+            if not self.llm_manager.model_name:
+                st.error("❌ Не найдено доступных LLM моделей")
+                st.info("Установите LLM модель: ollama pull <model_name>")
+                return False
+                
             st.info(f"Тестирование модели LLM ({self.llm_manager.model_name})...")
             try:
                 import ollama
@@ -117,6 +122,11 @@ class RAGPipeline:
                 return False
             
             # Test embedding model
+            if not self.vector_store.embedding_model:
+                st.error("❌ Не найдено доступных Embedding моделей")
+                st.info("Установите Embedding модель: ollama pull <model_name>")
+                return False
+                
             st.info(f"Тестирование модели эмбеддингов ({self.vector_store.embedding_model})...")
             try:
                 import ollama
@@ -233,7 +243,7 @@ class RAGPipeline:
         
         try:
             # Step 1: Search for relevant documents
-            search_results = self.vector_store.search_similar(query, k=5)
+            search_results = self.vector_store.search_similar(query, k=10)
             
             # Step 2: Route the query
             routing_result = self.router.route_query(query, search_results)
@@ -257,9 +267,19 @@ class RAGPipeline:
                 self.stats["successful_answers"] += 1
                 
             else:
-                # Cannot answer from local knowledge
-                answer = self._generate_fallback_response(query, routing_result)
-                response_type = "fallback"
+                # Cannot answer from local knowledge, but try with available context
+                if routing_result.get("context", "").strip():
+                    # We have some context, try to answer anyway
+                    answer = self.llm_manager.generate_response(
+                        prompt=query,
+                        context=routing_result["context"],
+                        temperature=0.2
+                    )
+                    response_type = "partial"
+                else:
+                    # No context available
+                    answer = self._generate_fallback_response(query, routing_result)
+                    response_type = "fallback"
                 self.stats["failed_answers"] += 1
             
             # Calculate response time

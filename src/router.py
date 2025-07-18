@@ -20,7 +20,7 @@ class SmartRouter:
         """
         self.llm_manager = llm_manager
         self.vector_store = vector_store
-        self.confidence_threshold = 0.3  # Similarity threshold for routing
+        self.confidence_threshold = 0.2  # Similarity threshold for routing (lowered for better recall)
     
     def analyze_query(self, query: str) -> Dict[str, Any]:
         """
@@ -142,18 +142,26 @@ class SmartRouter:
                 "query_analysis": query_analysis
             }
         
-        # Calculate relevance confidence
-        avg_distance = sum(result['distance'] for result in initial_search_results) / len(initial_search_results)
-        confidence = max(0, 1 - avg_distance)  # Convert distance to confidence
+        # Calculate relevance confidence - use best results, not average
+        best_distance = min(result['distance'] for result in initial_search_results)
+        confidence = max(0, 1 - best_distance)  # Convert distance to confidence using best match
         
         # Get context from search results
         context = "\n\n".join([result['content'] for result in initial_search_results])
         
-        # Use LLM to make routing decision
-        if confidence >= self.confidence_threshold:
+        # Simplified routing logic - be more permissive
+        if confidence >= 0.5:  # High confidence - always try to answer
+            can_answer = True
+        elif confidence >= self.confidence_threshold and len(context.strip()) > 50:
+            # Medium confidence with substantial context - use LLM decision
             can_answer = self.llm_manager.generate_router_decision(query, context)
+        elif len(context.strip()) > 100:  # Low confidence but lots of context
+            can_answer = True
         else:
             can_answer = False
+            
+        # Debug information (commented out for production)
+        # print(f"DEBUG Router: confidence={confidence:.2f}, threshold={self.confidence_threshold}, can_answer={can_answer}, context_length={len(context.strip())}")
         
         routing_result = {
             "can_answer": can_answer,
