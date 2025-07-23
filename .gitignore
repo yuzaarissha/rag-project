@@ -1,0 +1,100 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.development
+
+# Data directories
+data/documents/
+data/chroma_db/
+temp_*
+uploads/
+cache/
+
+# Configuration files
+config.json
+*.conf
+*.ini
+local_settings.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.vim/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+*.wheel
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Virtual environments
+.venv/
+pip-selfcheck.json
+
+# Model files (if stored locally)
+*.bin
+*.onnx
+*.pt
+*.pth
+*.safetensors
+
+# Streamlit
+.streamlit/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.backup
+*.old
