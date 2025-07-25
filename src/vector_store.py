@@ -144,34 +144,54 @@ class VectorStore:
             
             search_params = {
                 "query_embeddings": [query_embedding],
-                "n_results": min(k * 3, 50),
+                "n_results": min(k * 4, 100),
                 "include": ["documents", "metadatas", "distances"]
             }
-            
             if selected_documents != "all" and isinstance(selected_documents, list) and selected_documents:
                 search_params["where"] = {"filename": {"$in": selected_documents}}
-            
             results = self.collection.query(**search_params)
-            
-            formatted_results = []
+            candidates = []
             for i in range(len(results['documents'][0])):
                 distance = results['distances'][0][i]
                 similarity = 1 - distance
-                
                 if distance <= distance_threshold:
+                    metadata = results['metadatas'][0][i]
+                    content = results['documents'][0][i]
+                    boosted_score = self._calculate_boosted_score(
+                        query, content, metadata, similarity
+                    )
                     result = {
-                        "content": results['documents'][0][i],
-                        "metadata": results['metadatas'][0][i],
+                        "content": content,
+                        "metadata": metadata,
                         "distance": distance,
-                        "similarity": similarity
+                        "similarity": similarity,
+                        "boosted_score": boosted_score
                     }
-                    formatted_results.append(result)
-            
-            return formatted_results[:k]
-            
+                    candidates.append(result)
+            candidates.sort(key=lambda x: x['boosted_score'], reverse=True)
+            return candidates[:k]
         except Exception as e:
             st.error(f"Error searching documents: {str(e)}")
             return []
+
+    def _calculate_boosted_score(self, query: str, content: str, metadata: Dict[str, Any], base_similarity: float) -> float:
+        score = base_similarity
+        query_lower = query.lower()
+        content_lower = content.lower()
+        query_words = query_lower.split()
+        exact_matches = sum(1 for word in query_words if word in content_lower and len(word) > 3)
+        score += exact_matches * 0.1
+        if metadata.get("context_before") or metadata.get("context_after"):
+            score += 0.05
+        if metadata.get("section"):
+            if any(word in metadata.get("section", "").lower() for word in query_words):
+                score += 0.15
+        if len(content) < 100:
+            score -= 0.1
+        chunk_id = metadata.get("chunk_id", 999)
+        if chunk_id < 5:
+            score += 0.05
+        return min(score, 1.0)
     
     def get_collection_info(self) -> Dict[str, Any]:
         try:

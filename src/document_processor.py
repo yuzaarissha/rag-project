@@ -36,38 +36,77 @@ class DocumentProcessor:
                 page = doc[page_num]
                 page_text = page.get_text().strip()
                 if page_text:
-                    text += f"\n\n{page_text}"
+                    page_text = self._clean_page_text(page_text, page_num)
+                    if page_text.strip():
+                        text += f"\n\n--- Страница {page_num + 1} ---\n{page_text}"
             
             doc.close()
-            
+            text = self._clean_full_text(text.strip())
             return {
-                "text": text.strip(),
+                "text": text,
                 "metadata": metadata
             }
-            
         except Exception as e:
             st.error(f"Error extracting text from {pdf_path}: {str(e)}")
             return None
-    
+
+    def _clean_page_text(self, page_text: str, page_num: int) -> str:
+        lines = page_text.split('\n')
+        cleaned_lines = []
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            if re.match(r'^\d+$', line) and len(line) <= 3:
+                continue
+            if len(line) <= 3 and re.match(r'^[\d\s\-\.\|]+$', line):
+                continue
+            if any(header in line.lower() for header in ['page', 'страница', 'стр.', 'глава', 'chapter']):
+                if len(line) < 50:
+                    continue
+            line = re.sub(r'\s+', ' ', line)
+            cleaned_lines.append(line)
+        return '\n'.join(cleaned_lines)
+
+    def _clean_full_text(self, text: str) -> str:
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n\s*[-•]\s*\n', '\n', text)
+        text = re.sub(r'([а-яё])-\s*\n\s*([а-яё])', r'\1\2', text, flags=re.IGNORECASE)
+        return text.strip()
+
     def chunk_document(self, text: str, metadata: Dict[str, Any]) -> List[Document]:
         chunks = self.text_splitter.split_text(text)
-        
         documents = []
         valid_chunk_id = 0
-        
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             chunk_cleaned = chunk.strip()
             if len(chunk_cleaned) >= 50:
                 chunk_metadata = metadata.copy()
                 chunk_metadata["chunk_id"] = valid_chunk_id
                 chunk_metadata["chunk_size"] = len(chunk_cleaned)
-                
+                chunk_metadata["total_chunks"] = len([c for c in chunks if len(c.strip()) >= 50])
+                page_match = re.search(r'--- Страница (\d+) ---', chunk_cleaned)
+                if page_match:
+                    chunk_metadata["source_page"] = int(page_match.group(1))
+                section_match = re.search(r'(Статья \d+|Глава \d+|Раздел \d+)', chunk_cleaned)
+                if section_match:
+                    chunk_metadata["section"] = section_match.group(1)
+                context_before = ""
+                context_after = ""
+                if i > 0 and len(chunks[i-1].strip()) >= 20:
+                    context_before = chunks[i-1][-100:]
+                if i < len(chunks)-1 and len(chunks[i+1].strip()) >= 20:
+                    context_after = chunks[i+1][:100]
+                if context_before:
+                    chunk_metadata["context_before"] = context_before.strip()
+                if context_after:
+                    chunk_metadata["context_after"] = context_after.strip()
                 documents.append(Document(
                     page_content=chunk_cleaned,
                     metadata=chunk_metadata
                 ))
                 valid_chunk_id += 1
-        
         return documents
     
     def process_pdf_file(self, pdf_path: str) -> List[Document]:
@@ -223,8 +262,6 @@ class DocumentProcessor:
                 extracted_data["metadata"]
             )
             
-            if documents:
-                st.success(f"Создано {len(documents)} фрагментов из {extracted_data['metadata']['page_count']} страниц")
             
             return documents
             
@@ -253,7 +290,6 @@ class DocumentProcessor:
             
             if os.path.exists(file_path):
                 os.remove(file_path)
-                st.success(f"Physical file deleted: {filename}")
                 return True
             else:
                 st.warning(f"Physical file not found: {filename}")
@@ -278,7 +314,6 @@ class DocumentProcessor:
                 return False
             
             os.rename(old_path, new_path)
-            st.success(f"File renamed: {old_filename} → {new_filename}")
             return True
             
         except Exception as e:

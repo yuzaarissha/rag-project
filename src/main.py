@@ -2,6 +2,9 @@
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import time
+import json
+import logging
+from datetime import datetime
 from .document_processor import DocumentProcessor
 from .vector_store import VectorStore
 from .llm_manager import LLMManager
@@ -15,19 +18,50 @@ class RAGPipeline:
         self.vector_store = VectorStore(embedding_model=config.embedding_model)
         self.llm_manager = LLMManager(model_name=config.llm_model)
         self.router = SmartRouter(self.llm_manager, self.vector_store)
+        
         self.stats = {
             "total_queries": 0,
             "successful_answers": 0,
             "failed_answers": 0,
+            "no_sources_answers": 0,
             "average_response_time": 0.0,
-            "total_documents": 0
+            "total_documents": 0,
+            "hallucination_checks": 0,
+            "citation_rate": 0.0
         }
+        self._setup_logging()
+
+    def _setup_logging(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("RAG Pipeline initialized")
+
+    def _log_query_details(self, query: str, response: Dict[str, Any], sources: List[Dict[str, Any]]):
+        log_data = {
+            "timestamp": datetime.now().isoformat(),
+            "query": query[:100],
+            "response_type": response.get("response_type"),
+            "response_time": response.get("response_time"),
+            "sources_count": len(sources),
+            "source_files": [s.get("filename") for s in sources[:3]],
+            "confidence": response.get("routing_result", {}).get("confidence", 0.0),
+            "search_results_count": len(response.get("search_results", [])),
+            "best_similarity": max([1-r.get("distance", 1.0) for r in response.get("search_results", [])], default=0.0)
+        }
+        self.logger.info(f"Query processed: {json.dumps(log_data, ensure_ascii=False)}")
+
     def update_models(self, llm_model: str = None, embedding_model: str = None) -> bool:
         success = True
         if llm_model:
             if self.config_manager.update_llm_model(llm_model):
                 if self.llm_manager.update_model(llm_model):
-                    st.success(f"LLM модель обновлена: {llm_model}")
+                    pass
                 else:
                     st.error(f"Не удалось обновить LLM модель: {llm_model}")
                     success = False
@@ -38,7 +72,6 @@ class RAGPipeline:
         if embedding_model:
             if self.config_manager.update_embedding_model(embedding_model):
                 if self.vector_store.update_embedding_model(embedding_model):
-                    st.success(f"Embedding модель обновлена: {embedding_model}")
                     st.info("Создана новая коллекция для этой модели")
                     st.warning("Необходимо переиндексировать документы для новой модели")
                 else:
@@ -47,9 +80,8 @@ class RAGPipeline:
             else:
                 st.error(f"Embedding модель {embedding_model} недоступна")
                 success = False
-        
         return success
-    
+
     def initialize_system(self, silent: bool = False) -> bool:
         try:
             if not silent:
@@ -61,9 +93,6 @@ class RAGPipeline:
                 if response.status_code != 200:
                     st.error("Ollama сервис недоступен. Запустите: ollama serve")
                     return False
-                else:
-                    if not silent:
-                        st.success("Ollama сервис запущен")
             except requests.exceptions.ConnectionError:
                 st.error("Ollama сервис не запущен. Запустите: ollama serve")
                 return False
@@ -85,8 +114,7 @@ class RAGPipeline:
                     options={"num_predict": 1}
                 )
                 if test_response and 'response' in test_response:
-                    if not silent:
-                        st.success(f"Модель LLM ({self.llm_manager.model_name}) работает")
+                    pass
                 else:
                     st.error("Модель LLM не отвечает корректно")
                     return False
@@ -109,8 +137,7 @@ class RAGPipeline:
                     prompt="test"
                 )
                 if 'embedding' in test_response and test_response['embedding']:
-                    if not silent:
-                        st.success(f"Модель эмбеддингов ({self.vector_store.embedding_model}) работает")
+                    pass
                 else:
                     st.error("Модель эмбеддингов не возвращает векторы")
                     return False
@@ -126,14 +153,11 @@ class RAGPipeline:
                 if not silent:
                     st.info(f"Загружено {collection_info.get('document_count', 0)} фрагментов")
             
-            if not silent:
-                st.success("Все компоненты системы готовы к работе!")
             return True
-            
         except Exception as e:
             st.error(f"Ошибка инициализации системы: {str(e)}")
             return False
-    
+
     def load_documents_from_directory(self, directory_path: str) -> bool:
         try:
             st.info("Загрузка документов...")
@@ -144,21 +168,18 @@ class RAGPipeline:
                 st.error("Не удалось обработать документы")
                 return False
             
-            # Add to vector store
             success = self.vector_store.add_documents(documents)
             
             if success:
                 self.stats["total_documents"] = len(documents)
-                st.success(f"Успешно загружено {len(documents)} фрагментов документов")
                 return True
             else:
                 st.error("Не удалось добавить документы в векторную базу")
                 return False
-                
         except Exception as e:
             st.error(f"Ошибка загрузки документов: {str(e)}")
             return False
-    
+
     def reindex_existing_documents(self, directory_path: str) -> bool:
         try:
             st.info(f"Переиндексация документов из {directory_path}...")
@@ -169,12 +190,10 @@ class RAGPipeline:
                 st.error("Не удалось обработать документы")
                 return False
             
-            # Add to vector store
             success = self.vector_store.add_documents(documents)
             
             if success:
                 self.stats["total_documents"] = len(documents)
-                st.success(f"Успешно переиндексировано {len(documents)} фрагментов документов")
                 
                 status = self.get_system_status()
                 st.info(f"Статистика: {status['vector_store']['total_documents']} фрагментов из {status['vector_store']['unique_files']} файлов")
@@ -182,7 +201,6 @@ class RAGPipeline:
             else:
                 st.error("Не удалось добавить документы в векторную базу")
                 return False
-                
         except Exception as e:
             st.error(f"Ошибка переиндексации документов: {str(e)}")
             return False
@@ -197,33 +215,54 @@ class RAGPipeline:
                 st.error("Не удалось обработать файл")
                 return False
             
-            # Add to vector store
             success = self.vector_store.add_documents(documents)
             
             if success:
                 self.stats["total_documents"] += len(documents)
-                st.success(f"Файл обработан: {len(documents)} фрагментов добавлено")
                 return True
             else:
                 st.error("Не удалось добавить документы в векторную базу")
                 return False
-                
         except Exception as e:
             st.error(f"Ошибка обработки файла: {str(e)}")
             return False
-    
+
     def process_query(self, query: str, show_debug: bool = False, selected_documents: Any = "all") -> Dict[str, Any]:
         start_time = time.time()
-        
         try:
             search_results = self.vector_store.search_similar(
                 query, 
-                k=15, 
+                k=20, 
                 selected_documents=selected_documents,
-                distance_threshold=0.6
+                distance_threshold=0.7
             )
+            if not search_results or len(search_results) == 0:
+                self.stats["no_sources_answers"] += 1
+                response = {
+                    "answer": self._generate_no_sources_response(query),
+                    "response_type": "no_sources",
+                    "response_time": time.time() - start_time,
+                    "sources": [],
+                    "search_results": [],
+                    "routing_result": {"confidence": 0.0, "can_answer": False}
+                }
+                self._log_query_details(query, response, [])
+                return response
             
             routing_result = self.router.route_query(query, search_results)
+            sources = self._extract_sources(search_results)
+            if not sources or len(sources) == 0:
+                self.stats["no_sources_answers"] += 1
+                response = {
+                    "answer": self._generate_no_sources_response(query),
+                    "response_type": "no_sources", 
+                    "response_time": time.time() - start_time,
+                    "sources": [],
+                    "search_results": search_results,
+                    "routing_result": routing_result
+                }
+                self._log_query_details(query, response, [])
+                return response
             
             if routing_result["can_answer"]:
                 enhanced_context = self.router.enhance_context(
@@ -236,10 +275,8 @@ class RAGPipeline:
                     context=enhanced_context,
                     temperature=0.2
                 )
-                
                 response_type = "success"
                 self.stats["successful_answers"] += 1
-                
             else:
                 if routing_result.get("context", "").strip():
                     answer = self.llm_manager.generate_response(
@@ -252,15 +289,18 @@ class RAGPipeline:
                     answer = self._generate_fallback_response(query, routing_result)
                     response_type = "fallback"
                 self.stats["failed_answers"] += 1
-            
+
             response_time = time.time() - start_time
             self.stats["total_queries"] += 1
             self.stats["average_response_time"] = (
                 (self.stats["average_response_time"] * (self.stats["total_queries"] - 1) + response_time) 
                 / self.stats["total_queries"]
             )
-            
-            
+
+            total_successful = self.stats["successful_answers"] + self.stats["failed_answers"]
+            if total_successful > 0:
+                self.stats["citation_rate"] = (self.stats["successful_answers"] + self.stats["failed_answers"]) / self.stats["total_queries"]
+
             complete_response = {
                 "answer": answer,
                 "response_type": response_type,
@@ -268,11 +308,10 @@ class RAGPipeline:
                 "routing_result": routing_result,
                 "search_results": search_results,
                 "query_analysis": routing_result.get("query_analysis", {}),
-                "sources": self._extract_sources(search_results)
+                "sources": sources
             }
-            
+            self._log_query_details(query, complete_response, sources)
             return complete_response
-            
         except Exception as e:
             st.error(f"Ошибка обработки запроса: {str(e)}")
             return {
@@ -280,7 +319,20 @@ class RAGPipeline:
                 "response_type": "error",
                 "error": str(e)
             }
-    
+
+    def _generate_no_sources_response(self, query: str) -> str:
+        return """**Информация не найдена**
+
+К сожалению, в загруженных документах не найдено информации для ответа на ваш вопрос.
+
+**Возможные решения:**
+1. **Уточните запрос** - используйте более конкретные ключевые слова
+2. **Загрузите дополнительные документы** - добавьте файлы, содержащие нужную информацию
+3. **Проверьте правописание** - убедитесь в корректности терминов
+
+**Помните:** система отвечает только на основе загруженных документов и **всегда указывает источники**.
+"""
+
     def _generate_fallback_response(self, query: str, routing_result: Dict[str, Any]) -> str:
         language = routing_result.get("query_analysis", {}).get("language", "russian")
         confidence = routing_result.get("confidence", 0.0)
