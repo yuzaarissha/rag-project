@@ -1,9 +1,10 @@
 from typing import Dict, Any, Optional, List
-import streamlit as st
+import logging
 from .llm_manager import LLMManager
 from .vector_store import VectorStore
 class SmartRouter:
     def __init__(self, llm_manager: LLMManager, vector_store: VectorStore):
+        self.logger = logging.getLogger(__name__)
         self.llm_manager = llm_manager
         self.vector_store = vector_store
         self.confidence_threshold = 0.15
@@ -110,7 +111,7 @@ class SmartRouter:
                 context = self.llm_manager.summarize_context(context, max_length=2000)
             return context
         except Exception as e:
-            st.error(f"Error enhancing context: {str(e)}")
+            self.logger.error(f"Error enhancing context: {str(e)}")
             return context
     def get_routing_metrics(self) -> Dict[str, Any]:
         return {
@@ -123,7 +124,7 @@ class SmartRouter:
         if 0.0 <= new_threshold <= 1.0:
             self.confidence_threshold = new_threshold
         else:
-            st.error("Confidence threshold must be between 0.0 and 1.0")
+            self.logger.error("Confidence threshold must be between 0.0 and 1.0")
     def explain_routing_decision(self, routing_result: Dict[str, Any]) -> str:
         can_answer = routing_result.get('can_answer', False)
         confidence = routing_result.get('confidence', 0.0)

@@ -8,11 +8,14 @@ from langchain.schema import Document
 import os
 import hashlib
 import re
+from .document_processor import SimpleProgressTracker, ProcessingStage
+
 class VectorStore:
-    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "nomic-embed-text:latest"):
+    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "nomic-embed-text:latest", progress_tracker: Optional[SimpleProgressTracker] = None):
         self.base_collection_name = collection_name
         self.persist_directory = os.path.abspath(persist_directory)
         self.embedding_model = embedding_model
+        self.progress_tracker = progress_tracker
         
         os.makedirs(self.persist_directory, exist_ok=True)
         
@@ -66,9 +69,13 @@ class VectorStore:
     
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         try:
+            if self.progress_tracker:
+                self.progress_tracker.update_stage(ProcessingStage.GENERATING_EMBEDDINGS, f"Генерация {len(texts)} эмбеддингов")
+            
             embeddings = []
             
-            if len(texts) > 10:
+            # Используем прогресс-трекер если есть, иначе fallback к Streamlit
+            if not self.progress_tracker and len(texts) > 10:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
             
@@ -82,24 +89,39 @@ class VectorStore:
                     if 'embedding' in response and response['embedding']:
                         embeddings.append(response['embedding'])
                     else:
-                        st.error(f"Не удалось получить эмбеддинг для текста {i+1}")
+                        error_msg = f"Не удалось получить эмбеддинг для текста {i+1}"
+                        if self.progress_tracker:
+                            self.progress_tracker.set_error(error_msg)
+                        else:
+                            st.error(error_msg)
                         return []
                     
                 except Exception as e:
-                    st.error(f"Ошибка генерации эмбеддинга для текста {i+1}: {e}")
+                    error_msg = f"Ошибка генерации эмбеддинга для текста {i+1}: {e}"
+                    if self.progress_tracker:
+                        self.progress_tracker.set_error(error_msg)
+                    else:
+                        st.error(error_msg)
                     return []
                 
-                if len(texts) > 10:
+                # Обновление прогресса
+                if self.progress_tracker:
+                    self.progress_tracker.update_progress(i + 1, len(texts), f"Создан эмбеддинг {i + 1} из {len(texts)}")
+                elif len(texts) > 10:
                     progress_bar.progress((i + 1) / len(texts))
                     status_text.text(f"Генерация эмбеддингов: {i + 1}/{len(texts)}")
             
-            if len(texts) > 10:
+            if not self.progress_tracker and len(texts) > 10:
                 status_text.text(f"Сгенерировано {len(embeddings)} эмбеддингов")
             
             return embeddings
             
         except Exception as e:
-            st.error(f"Ошибка генерации эмбеддингов: {str(e)}")
+            error_msg = f"Ошибка генерации эмбеддингов: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return []
     
     def add_documents(self, documents: List[Document]) -> bool:
@@ -117,13 +139,19 @@ class VectorStore:
                 unique_id = f"{filename}_{chunk_id}_{hashlib.md5(doc.page_content.encode()).hexdigest()[:8]}"
                 ids.append(unique_id)
             
-            st.info("Generating embeddings...")
+            if not self.progress_tracker:
+                st.info("Generating embeddings...")
+            
             embeddings = self.generate_embeddings(texts)
             
             if not embeddings:
                 return False
             
-            st.info("Adding documents to vector store...")
+            if self.progress_tracker:
+                self.progress_tracker.update_stage(ProcessingStage.STORING_DOCUMENTS, f"Сохранение {len(documents)} документов в базу данных")
+            else:
+                st.info("Adding documents to vector store...")
+            
             self.collection.add(
                 documents=texts,
                 metadatas=metadatas,
@@ -131,14 +159,19 @@ class VectorStore:
                 embeddings=embeddings
             )
             
-            st.success(f"Added {len(documents)} documents to vector store")
+            if not self.progress_tracker:
+                st.success(f"Added {len(documents)} documents to vector store")
             return True
             
         except Exception as e:
-            st.error(f"Error adding documents: {str(e)}")
+            error_msg = f"Error adding documents: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return False
     
-    def search_similar(self, query: str, k: int = 5, selected_documents: Any = "all", distance_threshold: float = 0.7, use_hybrid: bool = True) -> List[Dict[str, Any]]:
+    def search_similar(self, query: str, k: int = 5, selected_documents: Any = "all", distance_threshold: float = 0.6) -> List[Dict[str, Any]]:
         try:
             query_embedding = self.generate_embeddings([query])[0]
             

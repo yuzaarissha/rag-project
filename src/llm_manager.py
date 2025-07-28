@@ -1,27 +1,50 @@
 import ollama
-import streamlit as st
 from typing import Dict, Any, Optional, List
 import json
+import logging
 class LLMManager:
     def __init__(self, model_name: str = "llama3.2:latest"):
         self.model_name = model_name
-        self.system_prompt = """Вы являетесь экспертным помощником для ответов на вопросы на основе предоставленного контекста. 
+        self.logger = logging.getLogger(__name__)
+        self.system_prompt = """РОЛЬ: Экспертный ассистент-аналитик документов
+
+ВАША МИССИЯ:
+Предоставлять точные, профессиональные ответы на основе загруженных документов с максимальной полезностью для пользователя.
 
 ОСНОВНЫЕ ПРИНЦИПЫ:
-1. ПРИОРИТЕТ: Максимально используйте предоставленный контекст для формирования полного и точного ответа
-2. АГРЕССИВНЫЙ ПОИСК: Ищите любую релевантную информацию в контексте, даже если она не очень очевидно связана с вопросом
-3. СИНТЕЗ: Объединяйте информацию из разных частей контекста для создания комплексного ответа
-4. СТРУКТУРА: Организуйте ответ логично - основная информация, детали, примеры
-5. ЯЗЫК: Отвечайте на том же языке, что и вопрос (русский/казахский/английский)
-6. ПОЛНОТА: Если в контексте есть связанная информация, включите её в ответ
-7. ЧЕСТНОСТЬ: Если контекст действительно не содержит информации для ответа, сообщите об этом
 
-ЗАПРЕЩЕНО:
-- Показывать внутренние размышления или теги <think>
-- Отвечать информацией не из контекста
-- Давать слишком краткие ответы, если в контексте есть больше деталей
+АНАЛИЗ И СИНТЕЗ:
+• Тщательно изучайте весь предоставленный контекст
+• Объединяйте информацию из разных частей документов
+• Выявляйте ключевые связи и закономерности
+• Структурируйте ответ логично и последовательно
 
-ФОРМАТ ОТВЕТА: Прямой, структурированный ответ без префиксов типа "На основе контекста..."""
+МНОГОЯЗЫЧНОСТЬ:
+• Автоматически определяйте язык вопроса
+• Отвечайте на том же языке (русский/казахский/английский)
+• Сохраняйте терминологию и стиль оригинальных документов
+
+КАЧЕСТВО ОТВЕТОВ:
+• Давайте конкретные, практичные ответы
+• Избегайте общих фраз и абстракций
+• Приводите конкретные факты, цифры, даты
+• Структурируйте сложную информацию в понятном виде
+
+ФОРМАТ ОТВЕТА:
+Чистый, читаемый текст без технических элементов. Используйте структурирование (списки, абзацы) для лучшего восприятия.
+
+СТРОГО ЗАПРЕЩЕНО:
+• Добавлять технические ссылки: [Источник: file.pdf, chunk_id: abc123]
+• Включать секции "Источники:" или "References:"
+• Показывать внутренние размышления или сомнения
+• Выдумывать информацию, не содержащуюся в документах
+• Использовать расплывчатые формулировки
+
+СТАНДАРТНЫЕ ОТВЕТЫ:
+• При отсутствии информации: "Информация не найдена в предоставленных документах"
+• При частичной информации: четко указывайте ограничения данных
+
+ЦЕЛЬ: Быть максимально полезным, точным и профессиональным помощником."""
     def update_model(self, model_name: str) -> bool:
         try:
             test_response = ollama.generate(
@@ -32,7 +55,7 @@ class LLMManager:
             self.model_name = model_name
             return True
         except Exception as e:
-            st.error(f"Failed to update model to {model_name}: {str(e)}")
+            self.logger.error(f"Failed to update model to {model_name}: {str(e)}")
             return False
     def check_model_availability(self) -> bool:
         try:
@@ -42,35 +65,40 @@ class LLMManager:
                 for model in models_response['models']:
                     if isinstance(model, dict) and 'name' in model:
                         available_models.append(model['name'])
-            st.info(f"Доступные модели: {available_models}")
+            self.logger.info(f"Доступные модели: {available_models}")
             is_available = self.model_name in available_models
             if not is_available:
-                st.warning(f"Модель {self.model_name} не найдена в списке доступных моделей")
-                st.info("Попробуйте использовать точное название из 'ollama list'")
+                self.logger.warning(f"Модель {self.model_name} не найдена в списке доступных моделей")
+                self.logger.info("Попробуйте использовать точное название из 'ollama list'")
             return is_available
         except Exception as e:
-            st.error(f"Ошибка проверки доступности моделей: {str(e)}")
+            self.logger.error(f"Ошибка проверки доступности моделей: {str(e)}")
             try:
                 test_response = ollama.generate(
                     model=self.model_name,
                     prompt="test",
                     options={"num_predict": 1}
                 )
-                st.success(f"Модель {self.model_name} работает (прямое тестирование)")
+                self.logger.info(f"Модель {self.model_name} работает (прямое тестирование)")
                 return True
             except Exception as test_error:
-                st.error(f"Модель {self.model_name} недоступна: {test_error}")
+                self.logger.error(f"Модель {self.model_name} недоступна: {test_error}")
                 return False
     def generate_response(self, prompt: str, context: str = "", temperature: float = 0.2) -> str:
         try:
             if context:
-                full_prompt = f"""Контекст: {context}
+                full_prompt = f"""БАЗА ЗНАНИЙ:
+{context}
 
-Вопрос: {prompt}
+ВОПРОС ПОЛЬЗОВАТЕЛЯ:
+{prompt}
 
-Ответ:"""
+ВАШ ЭКСПЕРТНЫЙ ОТВЕТ:"""
             else:
-                full_prompt = prompt
+                full_prompt = f"""ВОПРОС ПОЛЬЗОВАТЕЛЯ:
+{prompt}
+
+ВАШ ОТВЕТ:"""
             response = ollama.generate(
                 model=self.model_name,
                 prompt=full_prompt,
@@ -86,31 +114,50 @@ class LLMManager:
             clean_response = self._clean_response(response['response'].strip())
             return clean_response
         except Exception as e:
-            st.error(f"Error generating response: {str(e)}")
+            self.logger.error(f"Error generating response: {str(e)}")
             return "Извините, произошла ошибка при генерации ответа."
     def generate_router_decision(self, query: str, context: str) -> bool:
         try:
-            router_prompt = f"""Роль: Системный маршрутизатор
-Задача: Определить, может ли система ответить на вопрос пользователя на основе предоставленного текста.
+            router_prompt = f"""РОЛЬ: Интеллектуальный маршрутизатор RAG-системы
 
-Инструкции:
-- Если в тексте есть ЛЮБАЯ информация, связанная с вопросом, отвечайте "Да"
-- Если текст может дать хотя бы частичный ответ, отвечайте "Да"
-- Отвечайте "Нет" только если текст СОВСЕМ не связан с вопросом
-- Ваш ответ должен содержать только одно слово: "Да" или "Нет"
+МИССИЯ: Определить релевантность найденного контекста для ответа на вопрос пользователя
 
-Примеры:
-Текст: "Столица Франции - Париж."
-Вопрос: "Какая столица Франции?"
-Ответ: Да
+КРИТЕРИИ ОЦЕНКИ:
 
-Текст: "Население США составляет более 330 миллионов человек."
-Вопрос: "Какое население Китая?"
-Ответ: Нет
+ОТВЕЧАЙТЕ "Да" ЕСЛИ:
+• Контекст содержит ПРЯМОЙ ответ на вопрос
+• Контекст содержит ЧАСТИЧНУЮ информацию по теме
+• Контекст позволяет сделать ОБОСНОВАННЫЕ выводы
+• Контекст содержит СВЯЗАННЫЕ факты и данные
+• Можно дать ПОЛЕЗНЫЙ ответ даже с ограниченными данными
 
-Текст: {context}
-Вопрос: {query}
-Ответ:"""
+ОТВЕЧАЙТЕ "Нет" ТОЛЬКО ЕСЛИ:
+• Контекст ПОЛНОСТЬЮ не связан с темой вопроса
+• Информация НЕ ПОМОЖЕТ даже частично ответить
+• Контекст касается СОВЕРШЕННО ДРУГИХ предметов
+
+ПРИМЕРЫ АНАЛИЗА:
+
+Пример 1:
+Контекст: "Налоговый кодекс РК устанавливает ставку подоходного налога 10%"
+Вопрос: "Какая ставка подоходного налога?"
+Анализ: Прямой ответ → Да
+
+Пример 2:
+Контекст: "В 2023 году объем инвестиций составил 2.5 млрд тенге"
+Вопрос: "Какие налоги платят инвесторы?"
+Анализ: Связанная тема, частичная релевантность → Да
+
+Пример 3:
+Контекст: "Рецепт приготовления борща включает свеклу и капусту"
+Вопрос: "Какая ставка НДС на услуги?"
+Анализ: Полностью разные темы → Нет
+
+ВАШЕ РЕШЕНИЕ: Одно слово "Да" или "Нет"
+
+КОНТЕКСТ: {context}
+ВОПРОС: {query}
+РЕШЕНИЕ:"""
             response = ollama.generate(
                 model=self.model_name,
                 prompt=router_prompt,
@@ -124,23 +171,33 @@ class LLMManager:
             positive_indicators = ["да", "yes", "true", "1", "можно", "возможно", "есть", "имеется"]
             return any(indicator in answer for indicator in positive_indicators)
         except Exception as e:
-            st.error(f"Error in router decision: {str(e)}")
+            self.logger.error(f"Error in router decision: {str(e)}")
             return False
     def summarize_context(self, context: str, max_length: int = 1000) -> str:
         if len(context) <= max_length:
             return context
         try:
-            summary_prompt = f"""Задача: Кратко изложить основные моменты из следующего текста.
-Требования:
-- Сохранить ключевую информацию
-- Убрать повторения
-- Максимальная длина: {max_length} символов
-- Язык ответа: такой же, как в исходном тексте
+            summary_prompt = f"""РОЛЬ: Профессиональный аналитик-суммаризатор
 
-Текст:
+ЗАДАЧА: Создать структурированное краткое изложение документа
+
+ТРЕБОВАНИЯ:
+• Максимум {max_length} символов
+• Сохранить ВСЮ ключевую информацию
+• Выделить основные факты, цифры, даты
+• Убрать дублирования и избыточность
+• Сохранить язык оригинального текста
+• Структурировать по важности
+
+СТРУКТУРА ИЗЛОЖЕНИЯ:
+1. Главные факты и выводы
+2. Ключевые данные (цифры, даты, имена)
+3. Важные детали и контекст
+
+ИСХОДНЫЙ ДОКУМЕНТ:
 {context}
 
-Краткое изложение:"""
+СТРУКТУРИРОВАННОЕ ИЗЛОЖЕНИЕ:"""
             response = ollama.generate(
                 model=self.model_name,
                 prompt=summary_prompt,
@@ -152,20 +209,32 @@ class LLMManager:
             )
             return response['response'].strip()
         except Exception as e:
-            st.error(f"Error summarizing context: {str(e)}")
+            self.logger.error(f"Error summarizing context: {str(e)}")
             return context[:max_length] + "..."
     def extract_key_topics(self, text: str) -> List[str]:
         try:
-            topics_prompt = f"""Задача: Извлечь ключевые темы из следующего текста.
-Требования:
-- Выделить 5-10 основных тем
-- Каждая тема должна быть 1-3 слова
-- Ответ в формате: тема1, тема2, тема3...
+            topics_prompt = f"""РОЛЬ: Эксперт-аналитик семантических тем
 
-Текст:
+ЗАДАЧА: Извлечь и классифицировать ключевые темы из документа
+
+ТРЕБОВАНИЯ К ТЕМАМ:
+• 5-10 наиболее важных тем
+• Каждая тема: 1-3 ключевых слова
+• Приоритет: существительные и профессиональные термины
+• Избегать общих слов (процесс, система, документ)
+
+ТИПЫ ТЕМ ДЛЯ ПОИСКА:
+• Организации и учреждения
+• Процедуры и регламенты  
+• Правовые понятия и нормы
+• Технические термины
+• Численные показатели и даты
+• Географические названия
+
+АНАЛИЗИРУЕМЫЙ ТЕКСТ:
 {text}
 
-Ключевые темы:"""
+КЛЮЧЕВЫЕ ТЕМЫ (через запятую):"""
             response = ollama.generate(
                 model=self.model_name,
                 prompt=topics_prompt,
@@ -179,7 +248,7 @@ class LLMManager:
             topics = [topic.strip() for topic in topics_text.split(',')]
             return topics[:10]
         except Exception as e:
-            st.error(f"Error extracting topics: {str(e)}")
+            self.logger.error(f"Error extracting topics: {str(e)}")
             return []
     def get_model_info(self) -> Dict[str, Any]:
         try:
@@ -213,17 +282,35 @@ class LLMManager:
             )
             return True
         except Exception as e:
-            st.error(f"Connection test failed: {str(e)}")
-            st.info("Убедитесь, что:")
-            st.info("1. Ollama запущен: ollama serve")
-            st.info("2. Модель загружена: ollama pull <model_name>")
-            st.info("3. Модель доступна: ollama list")
+            self.logger.error(f"Connection test failed: {str(e)}")
+            self.logger.info("Убедитесь, что:")
+            self.logger.info("1. Ollama запущен: ollama serve")
+            self.logger.info("2. Модель загружена: ollama pull <model_name>")
+            self.logger.info("3. Модель доступна: ollama list")
             return False
     def _clean_response(self, response: str) -> str:
         import re
+        # Убираем внутренние размышления
         cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL | re.IGNORECASE)
         cleaned = re.sub(r'\*думаю\*.*?\*/?думаю\*', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
         cleaned = re.sub(r'\[думаю\].*?\[/?думаю\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Убираем форматирование источников
+        cleaned = re.sub(r'\[Источник:.*?\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[источник:.*?\]', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\[Source:.*?\]', '', cleaned, flags=re.IGNORECASE)
+        
+        # Убираем секции с источниками
+        cleaned = re.sub(r'\*\*Источники:\*\*.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'\*\*Sources:\*\*.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'Источники:.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'Sources:.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Убираем строки со списками источников
+        cleaned = re.sub(r'^[-•]\s*\[Источник:.*?\].*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+        cleaned = re.sub(r'^[-•]\s*\[Source:.*?\].*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+        
+        # Очищаем лишние переносы строк
         cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
         cleaned = cleaned.strip()
         return cleaned

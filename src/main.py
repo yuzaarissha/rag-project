@@ -1,4 +1,3 @@
-
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import time
@@ -7,12 +6,23 @@ from .vector_store import VectorStore
 from .llm_manager import LLMManager
 from .router import SmartRouter
 from .config import ConfigManager
+from .document_processor import SimpleProgressTracker
+
+
 class RAGPipeline:
-    def __init__(self):
+    def __init__(self, progress_tracker: Optional[SimpleProgressTracker] = None):
         self.config_manager = ConfigManager()
         config = self.config_manager.get_current_config()
-        self.document_processor = DocumentProcessor(chunk_size=1000, chunk_overlap=200)
-        self.vector_store = VectorStore(embedding_model=config.embedding_model)
+        self.progress_tracker = progress_tracker
+        self.document_processor = DocumentProcessor(
+            chunk_size=1000, 
+            chunk_overlap=200, 
+            progress_tracker=progress_tracker
+        )
+        self.vector_store = VectorStore(
+            embedding_model=config.embedding_model,
+            progress_tracker=progress_tracker
+        )
         self.llm_manager = LLMManager(model_name=config.llm_model)
         self.router = SmartRouter(self.llm_manager, self.vector_store)
         self.stats = {
@@ -136,12 +146,23 @@ class RAGPipeline:
     
     def load_documents_from_directory(self, directory_path: str) -> bool:
         try:
-            st.info("Загрузка документов...")
+            if self.progress_tracker:
+                from .document_processor import ProcessingStage
+                self.progress_tracker.update_stage(
+                    ProcessingStage.INITIALIZING,
+                    "Загрузка документов"
+                )
+            else:
+                st.info("Загрузка документов...")
             
             documents = self.document_processor.process_pdf_directory(directory_path)
             
             if not documents:
-                st.error("Не удалось обработать документы")
+                error_msg = "Не удалось обработать документы"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
             
             # Add to vector store
@@ -149,24 +170,46 @@ class RAGPipeline:
             
             if success:
                 self.stats["total_documents"] = len(documents)
-                st.success(f"Успешно загружено {len(documents)} фрагментов документов")
+                if self.progress_tracker:
+                    self.progress_tracker.finish_session(True)
+                else:
+                    st.success(f"Успешно загружено {len(documents)} фрагментов документов")
                 return True
             else:
-                st.error("Не удалось добавить документы в векторную базу")
+                error_msg = "Не удалось добавить документы в векторную базу"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
                 
         except Exception as e:
-            st.error(f"Ошибка загрузки документов: {str(e)}")
+            error_msg = f"Ошибка загрузки документов: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return False
     
     def reindex_existing_documents(self, directory_path: str) -> bool:
         try:
-            st.info(f"Переиндексация документов из {directory_path}...")
+            if self.progress_tracker:
+                from .document_processor import ProcessingStage
+                self.progress_tracker.update_stage(
+                    ProcessingStage.INITIALIZING,
+                    f"Переиндексация документов из {directory_path}"
+                )
+            else:
+                st.info(f"Переиндексация документов из {directory_path}...")
             
             documents = self.document_processor.process_pdf_directory(directory_path)
             
             if not documents:
-                st.error("Не удалось обработать документы")
+                error_msg = "Не удалось обработать документы"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
             
             # Add to vector store
@@ -174,27 +217,52 @@ class RAGPipeline:
             
             if success:
                 self.stats["total_documents"] = len(documents)
-                st.success(f"Успешно переиндексировано {len(documents)} фрагментов документов")
+                
+                if self.progress_tracker:
+                    self.progress_tracker.finish_session(True)
+                else:
+                    st.success(f"Успешно переиндексировано {len(documents)} фрагментов документов")
                 
                 status = self.get_system_status()
-                st.info(f"Статистика: {status['vector_store']['total_documents']} фрагментов из {status['vector_store']['unique_files']} файлов")
+                status_msg = f"Статистика: {status['vector_store']['total_documents']} фрагментов из {status['vector_store']['unique_files']} файлов"
+                if self.progress_tracker:
+                    # Показываем дополнительную информацию
+                    pass
+                else:
+                    st.info(status_msg)
                 return True
             else:
-                st.error("Не удалось добавить документы в векторную базу")
+                error_msg = "Не удалось добавить документы в векторную базу"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
                 
         except Exception as e:
-            st.error(f"Ошибка переиндексации документов: {str(e)}")
+            error_msg = f"Ошибка переиндексации документов: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return False
 
     def load_uploaded_file(self, uploaded_file) -> bool:
         try:
-            st.info(f"Обработка файла: {uploaded_file.name}")
+            if self.progress_tracker:
+                # Прогресс будет отображен внутри document_processor
+                pass
+            else:
+                st.info(f"Обработка файла: {uploaded_file.name}")
             
             documents = self.document_processor.process_uploaded_file(uploaded_file)
             
             if not documents:
-                st.error("Не удалось обработать файл")
+                error_msg = "Не удалось обработать файл"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
             
             # Add to vector store
@@ -202,25 +270,35 @@ class RAGPipeline:
             
             if success:
                 self.stats["total_documents"] += len(documents)
-                st.success(f"Файл обработан: {len(documents)} фрагментов добавлено")
+                if not self.progress_tracker:
+                    st.success(f"Файл обработан: {len(documents)} фрагментов добавлено")
                 return True
             else:
-                st.error("Не удалось добавить документы в векторную базу")
+                error_msg = "Не удалось добавить документы в векторную базу"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return False
                 
         except Exception as e:
-            st.error(f"Ошибка обработки файла: {str(e)}")
+            error_msg = f"Ошибка обработки файла: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return False
     
-    def process_query(self, query: str, show_debug: bool = False, selected_documents: Any = "all") -> Dict[str, Any]:
+    def process_query(self, query: str, show_debug: bool = False, selected_documents: Any = "all", 
+                     search_k: int = 15, temperature: float = 0.2, distance_threshold: float = 0.6) -> Dict[str, Any]:
         start_time = time.time()
         
         try:
             search_results = self.vector_store.search_similar(
                 query, 
-                k=15, 
+                k=search_k, 
                 selected_documents=selected_documents,
-                distance_threshold=0.6
+                distance_threshold=distance_threshold
             )
             
             routing_result = self.router.route_query(query, search_results)
@@ -234,7 +312,7 @@ class RAGPipeline:
                 answer = self.llm_manager.generate_response(
                     prompt=query,
                     context=enhanced_context,
-                    temperature=0.2
+                    temperature=temperature
                 )
                 
                 response_type = "success"
@@ -245,7 +323,7 @@ class RAGPipeline:
                     answer = self.llm_manager.generate_response(
                         prompt=query,
                         context=routing_result["context"],
-                        temperature=0.2
+                        temperature=temperature
                     )
                     response_type = "partial"
                 else:
@@ -373,13 +451,6 @@ I'll try to provide a partial answer based on the available information..."""
             export_text += f"## Запрос {i}\n"
             export_text += f"**Вопрос:** {entry.get('question', 'N/A')}\n\n"
             export_text += f"**Ответ:** {entry.get('answer', 'N/A')}\n\n"
-            
-            if entry.get('sources'):
-                export_text += "**Источники:**\n"
-                for source in entry['sources']:
-                    export_text += f"- {source.get('filename', 'Unknown')}\n"
-                export_text += "\n"
-            
             export_text += "---\n\n"
         
         return export_text

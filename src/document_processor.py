@@ -3,15 +3,297 @@ import fitz  # PyMuPDF
 import os
 import re
 import hashlib
+import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 import streamlit as st
+from enum import Enum
+from dataclasses import dataclass
+
+
+class ProcessingStage(Enum):
+    INITIALIZING = "initializing"
+    READING_PDF = "reading_pdf"
+    PROCESSING_TEXT = "processing_text"
+    CREATING_CHUNKS = "creating_chunks"
+    GENERATING_EMBEDDINGS = "generating_embeddings"
+    STORING_DOCUMENTS = "storing_documents"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+@dataclass
+class ProgressState:
+    stage: ProcessingStage = ProcessingStage.INITIALIZING
+    current_file: str = ""
+    current_step: int = 0
+    total_steps: int = 0
+    current_file_index: int = 0
+    total_files: int = 0
+    message: str = ""
+    error_message: str = ""
+    start_time: float = 0
+    stage_start_time: float = 0
+    
+    @property
+    def progress_percent(self) -> float:
+        if self.total_steps == 0:
+            return 0.0
+        return min(100.0, (self.current_step / self.total_steps) * 100.0)
+    
+    @property
+    def file_progress_percent(self) -> float:
+        if self.total_files == 0:
+            return 0.0
+        return min(100.0, (self.current_file_index / self.total_files) * 100.0)
+    
+    @property
+    def elapsed_time(self) -> float:
+        return time.time() - self.start_time if self.start_time > 0 else 0
+    
+    @property
+    def stage_elapsed_time(self) -> float:
+        return time.time() - self.stage_start_time if self.stage_start_time > 0 else 0
+
+
+class SimpleProgressTracker:
+    """Упрощенный трекер прогресса для v1.5.0, интегрированный со Streamlit"""
+    
+    def __init__(self):
+        self.state = ProgressState()
+        self.progress_placeholder = None
+        self.status_placeholder = None
+        self.detail_placeholder = None
+        self._is_active = False
+    
+    def setup_ui(self, container=None):
+        """Настройка UI элементов для отображения прогресса"""
+        if container is None:
+            container = st.container()
+        
+        with container:
+            self.progress_placeholder = st.empty()
+            self.status_placeholder = st.empty()
+            self.detail_placeholder = st.empty()
+    
+    def start_session(self, total_files: int, title: str = "Обработка документов"):
+        """Начать сессию обработки"""
+        self.state = ProgressState(
+            total_files=total_files,
+            start_time=time.time(),
+            stage_start_time=time.time()
+        )
+        self._is_active = True
+        
+        if self.progress_placeholder is None:
+            self.setup_ui()
+        
+        self._update_display(f"{title} ({total_files} файлов)")
+    
+    def start_file(self, filename: str, total_steps: int = 5):
+        """Начать обработку файла"""
+        self.state.current_file = filename
+        self.state.current_file_index += 1
+        self.state.current_step = 0
+        self.state.total_steps = total_steps
+        self.state.stage = ProcessingStage.READING_PDF
+        self.state.stage_start_time = time.time()
+        self.state.message = f"Начинаю обработку файла {filename}"
+        self.state.error_message = ""
+        
+        self._update_display()
+    
+    def update_stage(self, stage: ProcessingStage, message: str = "", step_increment: int = 1):
+        """Обновить текущий этап"""
+        self.state.stage = stage
+        self.state.current_step += step_increment
+        self.state.stage_start_time = time.time()
+        
+        if message:
+            self.state.message = message
+        else:
+            self.state.message = self._get_default_message(stage)
+        
+        self._update_display()
+    
+    def update_progress(self, current: int, total: int = None, message: str = ""):
+        """Обновить прогресс текущего этапа"""
+        self.state.current_step = current
+        if total is not None:
+            self.state.total_steps = total
+        if message:
+            self.state.message = message
+        
+        self._update_display()
+    
+    def set_error(self, error_message: str):
+        """Зарегистрировать ошибку"""
+        self.state.stage = ProcessingStage.ERROR
+        self.state.error_message = error_message
+        self.state.message = f"Ошибка: {error_message}"
+        
+        self._update_display()
+    
+    def complete_file(self):
+        """Завершить обработку текущего файла"""
+        self.state.stage = ProcessingStage.COMPLETED
+        self.state.current_step = self.state.total_steps
+        self.state.message = f"Файл {self.state.current_file} обработан успешно"
+        
+        self._update_display()
+    
+    def finish_session(self, success: bool = True):
+        """Завершить сессию"""
+        self._is_active = False
+        
+        if success:
+            self._show_final_success()
+        else:
+            self._show_final_error()
+    
+    def _update_display(self, title: str = None):
+        """Обновить отображение прогресса"""
+        if not self._is_active or not self.progress_placeholder:
+            return
+        
+        try:
+            # Основной прогресс-бар (файлы)
+            with self.progress_placeholder:
+                if title:
+                    st.subheader(title)
+                
+                if self.state.total_files > 0:
+                    file_progress = self.state.file_progress_percent / 100
+                    st.progress(
+                        file_progress, 
+                        text=f"Файл {self.state.current_file_index}/{self.state.total_files}"
+                    )
+            
+            # Статус текущего файла
+            with self.status_placeholder:
+                if self.state.current_file:
+                    step_progress = self.state.progress_percent / 100
+                    
+                    st.progress(
+                        step_progress,
+                        text=f"{self.state.current_file}: {self.state.message} ({self.state.progress_percent:.0f}%)"
+                    )
+            
+            # Детали и ошибки
+            with self.detail_placeholder:
+                if self.state.error_message:
+                    st.error(f"Ошибка: {self.state.error_message}")
+                elif self.state.stage_elapsed_time > 0:
+                    elapsed = self.state.stage_elapsed_time
+                    if elapsed < 60:
+                        time_str = f"{elapsed:.1f} сек"
+                    else:
+                        time_str = f"{elapsed/60:.1f} мин"
+                    
+                    st.caption(f"Время этапа: {time_str}")
+        
+        except Exception as e:
+            # Игнорируем ошибки UI для стабильности
+            pass
+    
+    def _show_final_success(self):
+        """Показать финальное сообщение об успехе"""
+        if self.progress_placeholder:
+            with self.progress_placeholder:
+                st.success(f"Успешно обработано {self.state.total_files} файлов")
+        
+        if self.status_placeholder:
+            with self.status_placeholder:
+                total_time = self.state.elapsed_time
+                if total_time < 60:
+                    time_str = f"{total_time:.1f} секунд"
+                else:
+                    time_str = f"{total_time/60:.1f} минут"
+                st.info(f"Общее время обработки: {time_str}")
+        
+        if self.detail_placeholder:
+            with self.detail_placeholder:
+                st.empty()
+    
+    def _show_final_error(self):
+        """Показать финальное сообщение об ошибке"""
+        if self.progress_placeholder:
+            with self.progress_placeholder:
+                st.error("Обработка завершена с ошибками")
+    
+    def _get_default_message(self, stage: ProcessingStage) -> str:
+        """Получить сообщение по умолчанию для этапа"""
+        message_map = {
+            ProcessingStage.INITIALIZING: "Инициализация",
+            ProcessingStage.READING_PDF: "Чтение PDF файла",
+            ProcessingStage.PROCESSING_TEXT: "Обработка текста",
+            ProcessingStage.CREATING_CHUNKS: "Создание фрагментов",
+            ProcessingStage.GENERATING_EMBEDDINGS: "Генерация эмбеддингов",
+            ProcessingStage.STORING_DOCUMENTS: "Сохранение в базу данных",
+            ProcessingStage.COMPLETED: "Завершено",
+            ProcessingStage.ERROR: "Ошибка"
+        }
+        return message_map.get(stage, "Обработка")
+    
+    def get_current_state(self) -> Dict[str, Any]:
+        """Получить текущее состояние для отладки"""
+        return {
+            "stage": self.state.stage.value,
+            "current_file": self.state.current_file,
+            "progress_percent": self.state.progress_percent,
+            "file_progress_percent": self.state.file_progress_percent,
+            "current_step": self.state.current_step,
+            "total_steps": self.state.total_steps,
+            "current_file_index": self.state.current_file_index,
+            "total_files": self.state.total_files,
+            "message": self.state.message,
+            "error_message": self.state.error_message,
+            "elapsed_time": self.state.elapsed_time,
+            "is_active": self._is_active
+        }
+
+
+class ProgressContext:
+    """Контекстный менеджер для автоматического управления прогрессом"""
+    
+    def __init__(self, total_files: int, title: str = "Обработка документов"):
+        self.tracker = SimpleProgressTracker()
+        self.total_files = total_files
+        self.title = title
+        self.success = True
+    
+    def __enter__(self):
+        self.tracker.setup_ui()
+        self.tracker.start_session(self.total_files, self.title)
+        return self.tracker
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None:
+            self.success = False
+            if hasattr(exc_val, '__str__'):
+                self.tracker.set_error(str(exc_val))
+        
+        self.tracker.finish_session(self.success)
+        return False  # Не подавлять исключения
 
 
 class DocumentProcessor:
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, progress_tracker: Optional[SimpleProgressTracker] = None):
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.progress_tracker = progress_tracker
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            length_function=len,
+            separators=["\n\nСтатья", "\n\n", ".\n", "\n", ". ", " ", ""],
+            keep_separator=True
+        )
+    
+    def update_chunk_settings(self, chunk_size: int, chunk_overlap: int):
+        """Обновить настройки разбиения на фрагменты"""
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -24,6 +306,9 @@ class DocumentProcessor:
     
     def extract_text_from_pdf(self, pdf_path: str) -> Dict[str, Any]:
         try:
+            if self.progress_tracker:
+                self.progress_tracker.update_stage(ProcessingStage.READING_PDF, "Открытие PDF файла")
+            
             doc = fitz.open(pdf_path)
             text = ""
             metadata = {
@@ -32,11 +317,18 @@ class DocumentProcessor:
                 "file_path": pdf_path
             }
             
+            if self.progress_tracker:
+                self.progress_tracker.update_stage(ProcessingStage.PROCESSING_TEXT, f"Извлечение текста из {len(doc)} страниц")
+            
             for page_num in range(len(doc)):
                 page = doc[page_num]
                 page_text = page.get_text().strip()
                 if page_text:
                     text += f"\n\n{page_text}"
+                
+                if self.progress_tracker:
+                    progress = int(((page_num + 1) / len(doc)) * 100)
+                    self.progress_tracker.update_progress(page_num + 1, len(doc), f"Обработана страница {page_num + 1} из {len(doc)}")
             
             doc.close()
             
@@ -46,16 +338,26 @@ class DocumentProcessor:
             }
             
         except Exception as e:
-            st.error(f"Error extracting text from {pdf_path}: {str(e)}")
+            error_msg = f"Error extracting text from {pdf_path}: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            st.error(error_msg)
             return None
     
     def chunk_document(self, text: str, metadata: Dict[str, Any]) -> List[Document]:
+        if self.progress_tracker:
+            self.progress_tracker.update_stage(ProcessingStage.CREATING_CHUNKS, "Разбиение текста на фрагменты")
+        
         chunks = self.text_splitter.split_text(text)
+        valid_chunks = [c for c in chunks if len(c.strip()) >= 50]
+        
+        if self.progress_tracker:
+            self.progress_tracker.update_progress(0, len(valid_chunks), f"Создание {len(valid_chunks)} фрагментов")
         
         documents = []
         valid_chunk_id = 0
         
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
             chunk_cleaned = chunk.strip()
             if len(chunk_cleaned) >= 50:
                 chunk_metadata = metadata.copy()
@@ -67,6 +369,9 @@ class DocumentProcessor:
                     metadata=chunk_metadata
                 ))
                 valid_chunk_id += 1
+                
+                if self.progress_tracker:
+                    self.progress_tracker.update_progress(valid_chunk_id, len(valid_chunks), f"Создан фрагмент {valid_chunk_id} из {len(valid_chunks)}")
         
         return documents
     
@@ -95,19 +400,40 @@ class DocumentProcessor:
         
         all_documents = []
         
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, pdf_file in enumerate(pdf_files):
-            status_text.text(f"Processing {pdf_file}...")
-            pdf_path = os.path.join(directory_path, pdf_file)
+        # Если есть прогресс-трекер, используем его, иначе fallback к обычным прогресс-барам
+        if self.progress_tracker:
+            if not self.progress_tracker._is_active:
+                self.progress_tracker.start_session(len(pdf_files), f"Обработка {len(pdf_files)} PDF файлов")
             
-            documents = self.process_pdf_file(pdf_path)
-            all_documents.extend(documents)
+            for i, pdf_file in enumerate(pdf_files):
+                try:
+                    self.progress_tracker.start_file(pdf_file, 5)  # 5 основных этапов
+                    pdf_path = os.path.join(directory_path, pdf_file)
+                    
+                    documents = self.process_pdf_file(pdf_path)
+                    all_documents.extend(documents)
+                    
+                    self.progress_tracker.complete_file()
+                    
+                except Exception as e:
+                    self.progress_tracker.set_error(f"Ошибка обработки {pdf_file}: {str(e)}")
+                    continue
             
-            progress_bar.progress((i + 1) / len(pdf_files))
-        
-        status_text.text(f"Processed {len(pdf_files)} PDF files, created {len(all_documents)} chunks")
+        else:
+            # Fallback к стандартным прогресс-барам Streamlit
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i, pdf_file in enumerate(pdf_files):
+                status_text.text(f"Processing {pdf_file}...")
+                pdf_path = os.path.join(directory_path, pdf_file)
+                
+                documents = self.process_pdf_file(pdf_path)
+                all_documents.extend(documents)
+                
+                progress_bar.progress((i + 1) / len(pdf_files))
+            
+            status_text.text(f"Processed {len(pdf_files)} PDF files, created {len(all_documents)} chunks")
         
         return all_documents
     
@@ -194,6 +520,9 @@ class DocumentProcessor:
     
     def process_uploaded_file(self, uploaded_file) -> List[Document]:
         try:
+            if self.progress_tracker:
+                self.progress_tracker.start_file(uploaded_file.name, 5)
+            
             docs_dir = os.path.abspath("./data/documents")
             os.makedirs(docs_dir, exist_ok=True)
             
@@ -207,11 +536,16 @@ class DocumentProcessor:
             with open(final_path, "wb") as f:
                 f.write(file_content)
             
-            st.info(f"Файл сохранен: {final_filename}")
+            if not self.progress_tracker:
+                st.info(f"Файл сохранен: {final_filename}")
             
             extracted_data = self.extract_text_from_pdf(final_path)
             if not extracted_data:
-                st.error("Не удалось извлечь текст из PDF")
+                error_msg = "Не удалось извлечь текст из PDF"
+                if self.progress_tracker:
+                    self.progress_tracker.set_error(error_msg)
+                else:
+                    st.error(error_msg)
                 return []
             
             extracted_data["metadata"]["filename"] = final_filename
@@ -223,13 +557,19 @@ class DocumentProcessor:
                 extracted_data["metadata"]
             )
             
-            if documents:
+            if self.progress_tracker:
+                self.progress_tracker.complete_file()
+            elif documents:
                 st.success(f"Создано {len(documents)} фрагментов из {extracted_data['metadata']['page_count']} страниц")
             
             return documents
             
         except Exception as e:
-            st.error(f"Ошибка обработки файла: {str(e)}")
+            error_msg = f"Ошибка обработки файла: {str(e)}"
+            if self.progress_tracker:
+                self.progress_tracker.set_error(error_msg)
+            else:
+                st.error(error_msg)
             return []
     
     def get_document_summary(self, documents: List[Document]) -> Dict[str, Any]:
