@@ -2,6 +2,8 @@ import ollama
 from typing import Dict, Any, Optional, List
 import json
 import logging
+
+
 class LLMManager:
     def __init__(self, model_name: str = "llama3.2:latest"):
         self.model_name = model_name
@@ -21,7 +23,7 @@ class LLMManager:
 
 МНОГОЯЗЫЧНОСТЬ:
 • Автоматически определяйте язык вопроса
-• Отвечайте на том же языке (русский/казахский/английский)
+• Отвечайте на том же языке (русский/английский)
 • Сохраняйте терминологию и стиль оригинальных документов
 
 КАЧЕСТВО ОТВЕТОВ:
@@ -45,6 +47,7 @@ class LLMManager:
 • При частичной информации: четко указывайте ограничения данных
 
 ЦЕЛЬ: Быть максимально полезным, точным и профессиональным помощником."""
+
     def update_model(self, model_name: str) -> bool:
         try:
             test_response = ollama.generate(
@@ -55,8 +58,10 @@ class LLMManager:
             self.model_name = model_name
             return True
         except Exception as e:
-            self.logger.error(f"Failed to update model to {model_name}: {str(e)}")
+            self.logger.error(
+                f"Failed to update model to {model_name}: {str(e)}")
             return False
+
     def check_model_availability(self) -> bool:
         try:
             models_response = ollama.list()
@@ -68,8 +73,10 @@ class LLMManager:
             self.logger.info(f"Доступные модели: {available_models}")
             is_available = self.model_name in available_models
             if not is_available:
-                self.logger.warning(f"Модель {self.model_name} не найдена в списке доступных моделей")
-                self.logger.info("Попробуйте использовать точное название из 'ollama list'")
+                self.logger.warning(
+                    f"Модель {self.model_name} не найдена в списке доступных моделей")
+                self.logger.info(
+                    "Попробуйте использовать точное название из 'ollama list'")
             return is_available
         except Exception as e:
             self.logger.error(f"Ошибка проверки доступности моделей: {str(e)}")
@@ -79,11 +86,14 @@ class LLMManager:
                     prompt="test",
                     options={"num_predict": 1}
                 )
-                self.logger.info(f"Модель {self.model_name} работает (прямое тестирование)")
+                self.logger.info(
+                    f"Модель {self.model_name} работает (прямое тестирование)")
                 return True
             except Exception as test_error:
-                self.logger.error(f"Модель {self.model_name} недоступна: {test_error}")
+                self.logger.error(
+                    f"Модель {self.model_name} недоступна: {test_error}")
                 return False
+
     def generate_response(self, prompt: str, context: str = "", temperature: float = 0.2) -> str:
         try:
             if context:
@@ -116,6 +126,7 @@ class LLMManager:
         except Exception as e:
             self.logger.error(f"Error generating response: {str(e)}")
             return "Извините, произошла ошибка при генерации ответа."
+
     def generate_router_decision(self, query: str, context: str) -> bool:
         try:
             router_prompt = f"""РОЛЬ: Интеллектуальный маршрутизатор RAG-системы
@@ -168,11 +179,13 @@ class LLMManager:
                 }
             )
             answer = response['response'].strip().lower()
-            positive_indicators = ["да", "yes", "true", "1", "можно", "возможно", "есть", "имеется"]
+            positive_indicators = ["да", "yes", "true",
+                                   "1", "можно", "возможно", "есть", "имеется"]
             return any(indicator in answer for indicator in positive_indicators)
         except Exception as e:
             self.logger.error(f"Error in router decision: {str(e)}")
             return False
+
     def summarize_context(self, context: str, max_length: int = 1000) -> str:
         if len(context) <= max_length:
             return context
@@ -211,6 +224,7 @@ class LLMManager:
         except Exception as e:
             self.logger.error(f"Error summarizing context: {str(e)}")
             return context[:max_length] + "..."
+
     def extract_key_topics(self, text: str) -> List[str]:
         try:
             topics_prompt = f"""РОЛЬ: Эксперт-аналитик семантических тем
@@ -250,6 +264,7 @@ class LLMManager:
         except Exception as e:
             self.logger.error(f"Error extracting topics: {str(e)}")
             return []
+
     def get_model_info(self) -> Dict[str, Any]:
         try:
             models_response = ollama.list()
@@ -269,10 +284,11 @@ class LLMManager:
             }
         except Exception as e:
             return {
-                "name": self.model_name, 
+                "name": self.model_name,
                 "available": False,
                 "error": str(e)
             }
+
     def test_connection(self) -> bool:
         try:
             response = ollama.generate(
@@ -288,29 +304,34 @@ class LLMManager:
             self.logger.info("2. Модель загружена: ollama pull <model_name>")
             self.logger.info("3. Модель доступна: ollama list")
             return False
+
     def _clean_response(self, response: str) -> str:
         import re
-        # Убираем внутренние размышления
-        cleaned = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = re.sub(r'\*думаю\*.*?\*/?думаю\*', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = re.sub(r'\[думаю\].*?\[/?думаю\]', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        
-        # Убираем форматирование источников
+        cleaned = re.sub(r'<think>.*?</think>', '', response,
+                         flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'\*думаю\*.*?\*/?думаю\*', '',
+                         cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'\[думаю\].*?\[/?думаю\]', '',
+                         cleaned, flags=re.DOTALL | re.IGNORECASE)
+
         cleaned = re.sub(r'\[Источник:.*?\]', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\[источник:.*?\]', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\[Source:.*?\]', '', cleaned, flags=re.IGNORECASE)
-        
-        # Убираем секции с источниками
-        cleaned = re.sub(r'\*\*Источники:\*\*.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = re.sub(r'\*\*Sources:\*\*.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = re.sub(r'Источники:.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = re.sub(r'Sources:.*?(?=\n\n|\Z)', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
-        
-        # Убираем строки со списками источников
-        cleaned = re.sub(r'^[-•]\s*\[Источник:.*?\].*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
-        cleaned = re.sub(r'^[-•]\s*\[Source:.*?\].*$', '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
-        
-        # Очищаем лишние переносы строк
+
+        cleaned = re.sub(r'\*\*Источники:\*\*.*?(?=\n\n|\Z)',
+                         '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'\*\*Sources:\*\*.*?(?=\n\n|\Z)', '',
+                         cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'Источники:.*?(?=\n\n|\Z)', '',
+                         cleaned, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = re.sub(r'Sources:.*?(?=\n\n|\Z)', '',
+                         cleaned, flags=re.DOTALL | re.IGNORECASE)
+
+        cleaned = re.sub(r'^[-•]\s*\[Источник:.*?\].*$',
+                         '', cleaned, flags=re.MULTILINE | re.IGNORECASE)
+        cleaned = re.sub(r'^[-•]\s*\[Source:.*?\].*$', '',
+                         cleaned, flags=re.MULTILINE | re.IGNORECASE)
+
         cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
         cleaned = cleaned.strip()
         return cleaned
