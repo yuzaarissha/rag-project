@@ -1,29 +1,30 @@
 import chromadb
-from chromadb.config import Settings
+from chromadb .config import Settings
 from typing import List, Dict, Any, Optional, Union
 import ollama
 import streamlit as st
-from langchain.schema import Document
+from langchain .schema import Document
 import os
 import hashlib
 import re
+import numpy as np
 from .document_processor import SimpleProgressTracker, ProcessingStage
 
 
 class VectorStore:
     def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "nomic-embed-text:latest", progress_tracker: Optional[SimpleProgressTracker] = None):
-        self.base_collection_name = collection_name
-        self.persist_directory = os.path.abspath(persist_directory)
-        self.embedding_model = embedding_model
-        self.progress_tracker = progress_tracker
+        self .base_collection_name = collection_name
+        self .persist_directory = os .path .abspath(persist_directory)
+        self .embedding_model = embedding_model
+        self .progress_tracker = progress_tracker
 
-        os.makedirs(self.persist_directory, exist_ok=True)
+        os .makedirs(self .persist_directory, exist_ok=True)
 
-        if os.path.exists(self.persist_directory):
-            os.chmod(self.persist_directory, 0o755)
+        if os .path .exists(self .persist_directory):
+            os .chmod(self .persist_directory, 0o755)
 
-        self.client = chromadb.PersistentClient(
-            path=self.persist_directory,
+        self .client = chromadb .PersistentClient(
+            path=self .persist_directory,
             settings=Settings(
                 anonymized_telemetry=False,
                 allow_reset=True,
@@ -31,104 +32,104 @@ class VectorStore:
             )
         )
 
-        self.collection_name = self._get_collection_name_for_model(
+        self .collection_name = self ._get_collection_name_for_model(
             embedding_model)
 
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
+        self .collection = self .client .get_or_create_collection(
+            name=self .collection_name,
             metadata={"hnsw:space": "cosine",
                       "embedding_model": embedding_model}
         )
 
     def _get_collection_name_for_model(self, model_name: str) -> str:
-        model_hash = hashlib.md5(model_name.encode()).hexdigest()[:8]
-        return f"{self.base_collection_name}_{model_hash}"
+        model_hash = hashlib .md5(model_name .encode()).hexdigest()[:8]
+        return f"{self .base_collection_name}_{model_hash}"
 
     def update_embedding_model(self, model_name: str) -> bool:
         try:
-            test_response = ollama.embeddings(
+            test_response = ollama .embeddings(
                 model=model_name,
                 prompt="test"
             )
 
             if 'embedding' in test_response and test_response['embedding']:
-                self.embedding_model = model_name
+                self .embedding_model = model_name
 
-                self.collection_name = self._get_collection_name_for_model(
+                self .collection_name = self ._get_collection_name_for_model(
                     model_name)
-                self.collection = self.client.get_or_create_collection(
-                    name=self.collection_name,
+                self .collection = self .client .get_or_create_collection(
+                    name=self .collection_name,
                     metadata={"hnsw:space": "cosine",
                               "embedding_model": model_name}
                 )
 
                 return True
             else:
-                st.error(f"Failed to test embedding model {model_name}")
+                st .error(f"Failed to test embedding model {model_name}")
                 return False
 
         except Exception as e:
-            st.error(
+            st .error(
                 f"Failed to update embedding model to {model_name}: {str(e)}")
             return False
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         try:
-            if self.progress_tracker:
-                self.progress_tracker.update_stage(
-                    ProcessingStage.GENERATING_EMBEDDINGS, f"Генерация {len(texts)} эмбеддингов")
+            if self .progress_tracker:
+                self .progress_tracker .update_stage(
+                    ProcessingStage .GENERATING_EMBEDDINGS, f"Генерация {len(texts)} эмбеддингов")
 
             embeddings = []
 
-            if not self.progress_tracker and len(texts) > 10:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+            if not self .progress_tracker and len(texts) > 10:
+                progress_bar = st .progress(0)
+                status_text = st .empty()
 
             for i, text in enumerate(texts):
                 try:
-                    response = ollama.embeddings(
-                        model=self.embedding_model,
+                    response = ollama .embeddings(
+                        model=self .embedding_model,
                         prompt=text
                     )
 
                     if 'embedding' in response and response['embedding']:
-                        embeddings.append(response['embedding'])
+                        embeddings .append(response['embedding'])
                     else:
-                        error_msg = f"Не удалось получить эмбеддинг для текста {i+1}"
-                        if self.progress_tracker:
-                            self.progress_tracker.set_error(error_msg)
+                        error_msg = f"Не удалось получить эмбеддинг для текста {i + 1}"
+                        if self .progress_tracker:
+                            self .progress_tracker .set_error(error_msg)
                         else:
-                            st.error(error_msg)
+                            st .error(error_msg)
                         return []
 
                 except Exception as e:
-                    error_msg = f"Ошибка генерации эмбеддинга для текста {i+1}: {e}"
-                    if self.progress_tracker:
-                        self.progress_tracker.set_error(error_msg)
+                    error_msg = f"Ошибка генерации эмбеддинга для текста {i + 1}: {e}"
+                    if self .progress_tracker:
+                        self .progress_tracker .set_error(error_msg)
                     else:
-                        st.error(error_msg)
+                        st .error(error_msg)
                     return []
 
-                if self.progress_tracker:
-                    self.progress_tracker.update_progress(
+                if self .progress_tracker:
+                    self .progress_tracker .update_progress(
                         i + 1, len(texts), f"Создан эмбеддинг {i + 1} из {len(texts)}")
                 elif len(texts) > 10:
-                    progress_bar.progress((i + 1) / len(texts))
-                    status_text.text(
+                    progress_bar .progress((i + 1)/len(texts))
+                    status_text .text(
                         f"Генерация эмбеддингов: {i + 1}/{len(texts)}")
 
-            if not self.progress_tracker and len(texts) > 10:
-                status_text.text(
+            if not self .progress_tracker and len(texts) > 10:
+                status_text .text(
                     f"Сгенерировано {len(embeddings)} эмбеддингов")
 
             return embeddings
 
         except Exception as e:
             error_msg = f"Ошибка генерации эмбеддингов: {str(e)}"
-            if self.progress_tracker:
-                self.progress_tracker.set_error(error_msg)
+            if self .progress_tracker:
+                self .progress_tracker .set_error(error_msg)
             else:
-                st.error(error_msg)
+                st .error(error_msg)
             return []
 
     def add_documents(self, documents: List[Document]) -> bool:
@@ -136,56 +137,65 @@ class VectorStore:
             if not documents:
                 return False
 
-            texts = [doc.page_content for doc in documents]
-            metadatas = [doc.metadata for doc in documents]
+            texts = [doc .page_content for doc in documents]
+            metadatas = [doc .metadata for doc in documents]
 
             ids = []
             for i, doc in enumerate(documents):
-                filename = doc.metadata.get("filename", "unknown")
-                chunk_id = doc.metadata.get("chunk_id", i)
-                unique_id = f"{filename}_{chunk_id}_{hashlib.md5(doc.page_content.encode()).hexdigest()[:8]}"
-                ids.append(unique_id)
+                filename = doc .metadata .get("filename", "unknown")
+                chunk_id = doc .metadata .get("chunk_id", i)
+                unique_id = f"{filename}_{chunk_id}_{hashlib .md5(doc .page_content .encode()).hexdigest()[:8]}"
+                ids .append(unique_id)
 
-            if not self.progress_tracker:
-                st.info("Generating embeddings...")
+            if not self .progress_tracker:
+                st .info("Generating embeddings...")
 
-            embeddings = self.generate_embeddings(texts)
+            embeddings = self .generate_embeddings(texts)
 
             if not embeddings:
                 return False
 
-            if self.progress_tracker:
-                self.progress_tracker.update_stage(
-                    ProcessingStage.STORING_DOCUMENTS, f"Сохранение {len(documents)} документов в базу данных")
+            if self .progress_tracker:
+                self .progress_tracker .update_stage(
+                    ProcessingStage .STORING_DOCUMENTS, f"Сохранение {len(documents)} документов в базу данных")
             else:
-                st.info("Adding documents to vector store...")
+                st .info("Adding documents to vector store...")
 
-            self.collection.add(
+            self .collection .add(
                 documents=texts,
                 metadatas=metadatas,
                 ids=ids,
                 embeddings=embeddings
             )
 
-            if not self.progress_tracker:
-                st.success(f"Added {len(documents)} documents to vector store")
+            if not self .progress_tracker:
+                st .success(
+                    f"Added {len(documents)} documents to vector store")
             return True
 
         except Exception as e:
             error_msg = f"Error adding documents: {str(e)}"
-            if self.progress_tracker:
-                self.progress_tracker.set_error(error_msg)
+            if self .progress_tracker:
+                self .progress_tracker .set_error(error_msg)
             else:
-                st.error(error_msg)
+                st .error(error_msg)
             return False
 
-    def search_similar(self, query: str, k: int = 5, selected_documents: Any = "all", distance_threshold: float = 0.6) -> List[Dict[str, Any]]:
+    def search_similar(self, query: str, k: int = 5, selected_documents: Any = "all",
+                       distance_threshold: float = 0.6, search_method: str = "mmr") -> List[Dict[str, Any]]:
         try:
-            query_embedding = self.generate_embeddings([query])[0]
+            query_embedding = self .generate_embeddings([query])[0]
+
+            if search_method == "mmr":
+
+                n_results = min(k * 4, 100)
+            else:
+
+                n_results = min(k * 2, 50)
 
             search_params = {
                 "query_embeddings": [query_embedding],
-                "n_results": min(k * 3, 50),
+                "n_results": n_results,
                 "include": ["documents", "metadatas", "distances"]
             }
 
@@ -193,9 +203,9 @@ class VectorStore:
                 search_params["where"] = {
                     "filename": {"$in": selected_documents}}
 
-            results = self.collection.query(**search_params)
+            results = self .collection .query(**search_params)
 
-            formatted_results = []
+            candidates = []
             for i in range(len(results['documents'][0])):
                 distance = results['distances'][0][i]
                 similarity = 1 - distance
@@ -205,115 +215,210 @@ class VectorStore:
                         "content": results['documents'][0][i],
                         "metadata": results['metadatas'][0][i],
                         "distance": distance,
-                        "similarity": similarity
+                        "similarity": similarity,
+                        "embedding": None
                     }
-                    formatted_results.append(result)
+                    candidates .append(result)
 
-            return formatted_results[:k]
+            if search_method == "similarity":
+
+                final_results = sorted(
+                    candidates, key=lambda x: x["similarity"], reverse=True)[:k]
+            elif search_method == "threshold":
+
+                final_results = sorted(
+                    candidates, key=lambda x: x["similarity"], reverse=True)[:k]
+            elif search_method == "mmr":
+
+                final_results = self ._apply_mmr(
+                    candidates, query_embedding, k, lambda_param=0.7)
+            else:
+
+                final_results = sorted(
+                    candidates, key=lambda x: x["similarity"], reverse=True)[:k]
+
+            for result in final_results:
+                if "embedding" in result:
+                    del result["embedding"]
+
+            return final_results
 
         except Exception as e:
-            st.error(f"Error searching documents: {str(e)}")
+            st .error(f"Error searching documents: {str(e)}")
             return []
+
+    def _apply_mmr(self, candidates: List[Dict[str, Any]], query_embedding: List[float],
+                   k: int, lambda_param: float = 0.7) -> List[Dict[str, Any]]:
+        """Применяет алгоритм Maximal Marginal Relevance для диверсификации результатовlambda_param: баланс между релевантностью (1.0) и диверсификацией (0.0)"""
+        try:
+            if not candidates or k <= 0:
+                return []
+
+            if len(candidates) <= k:
+                return candidates
+
+            for candidate in candidates:
+                if candidate["embedding"] is None:
+                    candidate["embedding"] = self .generate_embeddings(
+                        [candidate["content"]])[0]
+
+            selected = [max(candidates, key=lambda x: x["similarity"])]
+            remaining = [c for c in candidates if c != selected[0]]
+
+            while len(selected) < k and remaining:
+                best_score = float('-inf')
+                best_doc = None
+
+                for candidate in remaining:
+
+                    relevance = candidate["similarity"]
+
+                    max_similarity = 0.0
+                    for selected_doc in selected:
+                        sim = self ._calculate_cosine_similarity(
+                            candidate["embedding"], selected_doc["embedding"]
+                        )
+                        max_similarity = max(max_similarity, sim)
+
+                    mmr_score = lambda_param * relevance - \
+                        (1 - lambda_param)*max_similarity
+
+                    if mmr_score > best_score:
+                        best_score = mmr_score
+                        best_doc = candidate
+
+                if best_doc:
+                    selected .append(best_doc)
+                    remaining .remove(best_doc)
+                else:
+                    break
+
+            return selected
+
+        except Exception as e:
+            st .error(f"Error applying MMR: {str(e)}")
+
+            return sorted(candidates, key=lambda x: x["similarity"], reverse=True)[:k]
+
+    def _calculate_cosine_similarity(self, embedding1: List[float], embedding2: List[float]) -> float:
+        """Вычисляет косинусное сходство между двумя эмбеддингами"""
+        try:
+
+            vec1 = np .array(embedding1)
+            vec2 = np .array(embedding2)
+
+            dot_product = np .dot(vec1, vec2)
+            norm1 = np .linalg .norm(vec1)
+            norm2 = np .linalg .norm(vec2)
+
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+
+            return dot_product / (norm1 * norm2)
+
+        except Exception as e:
+            st .error(f"Error calculating cosine similarity: {str(e)}")
+            return 0.0
 
     def get_collection_info(self) -> Dict[str, Any]:
         try:
-            count = self.collection.count()
+            count = self .collection .count()
             return {
                 "document_count": count,
-                "collection_name": self.collection_name,
-                "persist_directory": self.persist_directory
+                "collection_name": self .collection_name,
+                "persist_directory": self .persist_directory
             }
         except Exception as e:
-            st.error(f"Error getting collection info: {str(e)}")
+            st .error(f"Error getting collection info: {str(e)}")
             return {"document_count": 0}
 
     def clear_collection(self) -> bool:
         try:
-            self.client.delete_collection(self.collection_name)
+            self .client .delete_collection(self .collection_name)
 
-            self.collection = self.client.get_or_create_collection(
-                name=self.collection_name,
+            self .collection = self .client .get_or_create_collection(
+                name=self .collection_name,
                 metadata={"hnsw:space": "cosine"}
             )
 
-            st.success("Collection cleared successfully")
+            st .success("Collection cleared successfully")
             return True
 
         except Exception as e:
-            st.error(f"Error clearing collection: {str(e)}")
+            st .error(f"Error clearing collection: {str(e)}")
             return False
 
     def delete_documents_by_filename(self, filename: str) -> bool:
         try:
-            results = self.collection.get(
+            results = self .collection .get(
                 include=["metadatas"]
             )
 
             ids_to_delete = []
             for i, metadata in enumerate(results['metadatas']):
-                if metadata.get('filename') == filename:
-                    ids_to_delete.append(results['ids'][i])
+                if metadata .get('filename') == filename:
+                    ids_to_delete .append(results['ids'][i])
 
             if ids_to_delete:
-                self.collection.delete(ids=ids_to_delete)
-                st.success(
+                self .collection .delete(ids=ids_to_delete)
+                st .success(
                     f"Deleted {len(ids_to_delete)} documents from {filename}")
                 return True
             else:
-                st.warning(f"No documents found for {filename}")
+                st .warning(f"No documents found for {filename}")
                 return False
 
         except Exception as e:
-            st.error(f"Error deleting documents: {str(e)}")
+            st .error(f"Error deleting documents: {str(e)}")
             return False
 
     def delete_documents_by_filenames(self, filenames: List[str]) -> Dict[str, bool]:
         results = {}
 
         for filename in filenames:
-            results[filename] = self.delete_documents_by_filename(filename)
+            results[filename] = self .delete_documents_by_filename(filename)
 
         return results
 
     def update_filename_in_metadata(self, old_filename: str, new_filename: str) -> bool:
         try:
-            results = self.collection.get(
+            results = self .collection .get(
                 where={"filename": old_filename},
                 include=["metadatas", "documents", "embeddings"]
             )
 
             if not results['ids']:
-                st.warning(f"No documents found for {old_filename}")
+                st .warning(f"No documents found for {old_filename}")
                 return False
 
             updated_metadatas = []
             for metadata in results['metadatas']:
-                updated_metadata = metadata.copy()
+                updated_metadata = metadata .copy()
                 updated_metadata['filename'] = new_filename
-                updated_metadatas.append(updated_metadata)
+                updated_metadatas .append(updated_metadata)
 
-            self.collection.delete(ids=results['ids'])
+            self .collection .delete(ids=results['ids'])
 
-            self.collection.add(
+            self .collection .add(
                 ids=results['ids'],
                 documents=results['documents'],
                 metadatas=updated_metadatas,
                 embeddings=results['embeddings']
             )
 
-            st.success(
+            st .success(
                 f"Updated filename from {old_filename} to {new_filename}")
             return True
 
         except Exception as e:
-            st.error(f"Error updating filename: {str(e)}")
+            st .error(f"Error updating filename: {str(e)}")
             return False
 
     def get_document_summary(self) -> Dict[str, Any]:
         try:
-            results = self.collection.get(include=["metadatas"])
+            results = self .collection .get(include=["metadatas"])
 
-            if not results or not results.get('metadatas'):
+            if not results or not results .get('metadatas'):
                 return {
                     "total_documents": 0,
                     "unique_files": 0,
@@ -323,23 +428,23 @@ class VectorStore:
 
             filenames = []
             for metadata in results['metadatas']:
-                filename = metadata.get('filename', 'unknown')
+                filename = metadata .get('filename', 'unknown')
                 if filename and filename != 'unknown':
-                    filenames.append(filename)
+                    filenames .append(filename)
 
             unique_filenames = list(set(filenames))
 
             file_details = {}
             for filename in unique_filenames:
                 file_chunks = [m for m in results['metadatas']
-                               if m.get('filename') == filename]
+                               if m .get('filename') == filename]
                 if file_chunks:
                     first_chunk = file_chunks[0]
                     file_details[filename] = {
                         "chunk_count": len(file_chunks),
-                        "page_count": first_chunk.get('page_count', 'Unknown'),
-                        "file_path": first_chunk.get('file_path', 'Unknown'),
-                        "original_name": first_chunk.get('original_name', filename)
+                        "page_count": first_chunk .get('page_count', 'Unknown'),
+                        "file_path": first_chunk .get('file_path', 'Unknown'),
+                        "original_name": first_chunk .get('original_name', filename)
                     }
 
             return {
@@ -350,34 +455,34 @@ class VectorStore:
             }
 
         except Exception as e:
-            st.error(f"Error getting document summary: {str(e)}")
+            st .error(f"Error getting document summary: {str(e)}")
             return {"total_documents": 0, "unique_files": 0, "filenames": [], "file_details": {}}
 
     def get_document_preview(self, filename: str, max_length: int = 300) -> str:
         try:
-            results = self.collection.get(
+            results = self .collection .get(
                 where={"filename": filename},
                 include=["documents"],
                 limit=2
             )
 
-            if not results or not results.get('documents') or len(results['documents']) == 0:
+            if not results or not results .get('documents') or len(results['documents']) == 0:
                 return "Предпросмотр недоступен"
 
             preview_text = ""
             for doc_text in results['documents']:
-                if doc_text and doc_text.strip():
-                    preview_text += doc_text.strip() + " "
+                if doc_text and doc_text .strip():
+                    preview_text += doc_text .strip()+""
                     if len(preview_text) > max_length:
                         break
 
-            preview_text = preview_text.strip()
+            preview_text = preview_text .strip()
 
-            preview_text = re.sub(r'--- Page \d+ ---', '', preview_text)
+            preview_text = re .sub(r'--- Page \d+ ---', '', preview_text)
 
             if len(preview_text) > max_length:
-                preview_text = preview_text[:max_length].rsplit(' ', 1)[
-                    0] + "..."
+                preview_text = preview_text[:max_length].rsplit('', 1)[
+                    0]+"..."
 
             return preview_text if preview_text else "Контент не найден"
 
@@ -386,12 +491,12 @@ class VectorStore:
 
     def get_full_document_content(self, filename: str) -> Dict[str, Any]:
         try:
-            results = self.collection.get(
+            results = self .collection .get(
                 where={"filename": filename},
                 include=["documents", "metadatas"]
             )
 
-            if not results or not results.get('documents'):
+            if not results or not results .get('documents'):
                 return {
                     "success": False,
                     "error": "Документ не найден",
@@ -401,17 +506,17 @@ class VectorStore:
 
             chunks_data = []
             for i, doc_text in enumerate(results['documents']):
-                metadata = results['metadatas'][i] if i < len(
-                    results['metadatas']) else {}
-                chunk_id = metadata.get('chunk_id', i)
+                metadata = results['metadatas'][i]if i < len(
+                    results['metadatas'])else {}
+                chunk_id = metadata .get('chunk_id', i)
 
-                chunks_data.append({
+                chunks_data .append({
                     "chunk_id": chunk_id,
                     "text": doc_text,
                     "metadata": metadata
                 })
 
-            chunks_data.sort(key=lambda x: x['chunk_id'])
+            chunks_data .sort(key=lambda x: x['chunk_id'])
 
             full_text = ""
             for chunk_data in chunks_data:
@@ -419,23 +524,23 @@ class VectorStore:
                 if text:
                     full_text += text + "\n\n"
 
-            full_text = full_text.strip()
+            full_text = full_text .strip()
 
-            full_text = re.sub(r'--- Page \d+ ---\s*',
-                               '\n\n=== Страница ===\n\n', full_text)
+            full_text = re .sub(r'--- Page \d+ ---\s*',
+                                '\n\n=== Страница ===\n\n', full_text)
 
-            full_text = re.sub(r'\n\s*\n\s*\n', '\n\n', full_text)
+            full_text = re .sub(r'\n\s*\n\s*\n', '\n\n', full_text)
 
-            first_metadata = chunks_data[0]['metadata'] if chunks_data else {}
+            first_metadata = chunks_data[0]['metadata']if chunks_data else {}
 
             return {
                 "success": True,
                 "content": full_text,
                 "chunks": chunks_data,
                 "total_chunks": len(chunks_data),
-                "page_count": first_metadata.get('page_count', 'Unknown'),
-                "file_path": first_metadata.get('file_path', 'Unknown'),
-                "original_name": first_metadata.get('original_name', filename),
+                "page_count": first_metadata .get('page_count', 'Unknown'),
+                "file_path": first_metadata .get('file_path', 'Unknown'),
+                "original_name": first_metadata .get('original_name', filename),
                 "total_characters": len(full_text)
             }
 
