@@ -12,36 +12,6 @@ import markdown
 from bs4 import BeautifulSoup
 
 
-def markdown_to_text(markdown_text: str) -> str:
-    try:
-        text = markdown_text
-
-        text = re .sub(r'^#{1,6}\s+', '', text, flags=re .MULTILINE)
-
-        text = re .sub(r'\*\*(.*?)\*\*', r'\1', text)
-        text = re .sub(r'__(.*?)__', r'\1', text)
-
-        text = re .sub(r'\*(.*?)\*', r'\1', text)
-        text = re .sub(r'_(.*?)_', r'\1', text)
-
-        text = re .sub(r'^\s*[-*+]\s+', '', text, flags=re .MULTILINE)
-        text = re .sub(r'^\s*\d+\.\s+', '', text, flags=re .MULTILINE)
-
-        text = re .sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-
-        text = re .sub(r'`([^`]+)`', r'\1', text)
-
-        text = re .sub(
-            r'```[^`]*```', lambda m: m .group(0).replace('```', '').strip(), text, flags=re .DOTALL)
-
-        text = re .sub(r'^---+$', '', text, flags=re .MULTILINE)
-
-        return text
-
-    except Exception:
-        return markdown_text
-
-
 st .set_page_config(
     page_title="RAG System",
     page_icon="",
@@ -53,7 +23,7 @@ st .set_page_config(
 if "session_manager"not in st .session_state:
     st .session_state .session_manager = SessionManager()
 
-    st .session_state .session_manager .initialize_defaults()
+    st .session_state .session_manager .initialize_with_autorestore()
 if "rag_pipeline"not in st .session_state:
     st .session_state .rag_pipeline = RAGPipeline()
 if "conversation_history"not in st .session_state:
@@ -99,6 +69,7 @@ if not st .session_state .system_initialized:
                 st .session_state .system_initialized = st .session_state .rag_pipeline .initialize_system()
 st .session_state .debug_mode = st .sidebar .checkbox(
     "Режим отладки", value=st .session_state .debug_mode)
+
 if page == "Чат":
     st .sidebar .markdown("""<style>div[data-testid="stSidebar"].stButton > button {background: transparent;border: 1px solid rgba(255, 255, 255, 0.2);color: rgba(255, 255, 255, 0.9);padding: 8px 12px;border-radius: 6px;font-size: 14px;font-weight: normal;transition: all 0.2s ease;min-height: 36px;}div[data-testid="stSidebar"].stButton > button:hover {background: rgba(255, 255, 255, 0.1);border-color: rgba(255, 255, 255, 0.3);color: white;}div[data-testid="stSidebar"].stSelectbox > div > div {background: transparent;border: 1px solid rgba(255, 255, 255, 0.2);border-radius: 6px;color: rgba(255, 255, 255, 0.9);min-height: 36px;}div[data-testid="stSidebar"].stSelectbox > div > div > div {color: rgba(255, 255, 255, 0.9);padding: 8px 12px;font-size: 14px;}div[data-testid="stSidebar"].stTextInput > div > div > input {background: transparent;border: 1px solid rgba(255, 255, 255, 0.2);color: rgba(255, 255, 255, 0.9);padding: 8px 12px;border-radius: 6px;font-size: 14px;min-height: 36px;}div[data-testid="stSidebar"].stTextInput > div > div > input:focus {border-color: rgba(255, 255, 255, 0.4);outline: none;background: rgba(255, 255, 255, 0.05);}div[data-testid="stSidebar"].stSelectbox svg {display: none;}div[data-testid="stSidebar"].stSelectbox > div > div::after {content: "⋯";position: absolute;right: 12px;top: 50%;transform: translateY(-50%);color: rgba(255, 255, 255, 0.5);font-size: 16px;pointer-events: none;}</style>""", unsafe_allow_html=True)
 
@@ -204,14 +175,6 @@ if st .session_state .system_initialized:
         total_count = status["vector_store"]["unique_files"]
         st .sidebar .write(f"**Активных:** {active_count} из {total_count}")
 
-    if "session_manager" in st .session_state:
-        session_info = st .session_state .session_manager .get_session_info()
-        st .sidebar .subheader("Сессия")
-        st .sidebar .write(
-            f"**Тип:** {session_info .get('session_type', 'local')}")
-        st .sidebar .write(
-            f"**Настройки:** {session_info .get('total_settings', 0)}")
-        st .sidebar .success("Локальная работа")
 if page == "Главная":
     st .title("Главная страница")
 
@@ -234,11 +197,25 @@ if page == "Главная":
 
     with col1:
         st .subheader("Основные возможности")
-        st .markdown("""- **Hybrid Search** - комбинированный поиск по документам- **Точные ответы** - каждый ответ основан на загруженных документах- **Контекстные диалоги** - система помнит предыдущие вопросы- **Умная маршрутизация** - определение релевантности запросов- **Многоязычность** - поддержка русского языка- **Локальная обработка** - все данные остаются на вашем компьютере""")
+        st .markdown("""
+ - **Hybrid Search** - комбинированный поиск по документам
+ - **Точные ответы** - каждый ответ основан на загруженных документах
+ - **Контекстные диалоги** - система помнит предыдущие вопросы
+ - **Умная маршрутизация** - определение релевантности запросов
+ - **Многоязычность** - поддержка русского и казахского языков
+ - **Локальная обработка** - все данные остаются на вашем компьютере
+ """)
 
     with col2:
         st .subheader("Технологический стек")
-        st .markdown("""- **LLM:** Ollama- **Embeddings:** SentenceTransformers- **Векторная БД:** ChromaDB- **Поиск:** BM25 + Vector Hybrid- **Обработка документов:** PyMuPDF, python-docx- **Интерфейс:** Streamlit""")
+        st .markdown("""
+ - **LLM:** Ollama
+ - **Embeddings:** SentenceTransformers
+ - **Векторная БД:** ChromaDB
+ - **Поиск:** BM25 + Vector Hybrid
+ - **Обработка PDF:** PyMuPDF
+ - **Интерфейс:** Streamlit
+ """)
 
     col1, col2 = st .columns(2)
 
@@ -247,13 +224,17 @@ if page == "Главная":
         config = st .session_state .rag_pipeline .config_manager .get_current_config()
         st .info(f"""
         **LLM модель:** {config .llm_model}
-        
+
         **Embedding модель:** {config .embedding_model}
         """)
 
     with col2:
         st .subheader("Как начать")
-        st .markdown("""1. Перейдите в **"Документы"** и загрузите файлы (PDF, DOCX, TXT)2. Откройте **"Чат"** и задайте вопросы3. В **"Настройки"** можно изменить модели""")
+        st .markdown("""
+ 1. Перейдите в **"Документы"** и загрузите PDF файлы
+ 2. Откройте **"Чат"** и задайте вопросы
+ 3. В **"Настройки"** можно изменить модели
+ """)
 
     if status["vector_store"]["total_documents"] == 0:
         st .warning("Для начала работы загрузите документы")
@@ -794,7 +775,8 @@ elif page == "Чат":
                     st .markdown(message["content"])
 
                     with st .expander("Копировать текст", expanded=False):
-                        clean_text = markdown_to_text(message["content"])
+                        clean_text = st .session_state .rag_pipeline .markdown_to_text(
+                            message["content"])
                         st .text(clean_text)
 
                     if "metadata" in message and st .session_state .debug_mode:
@@ -858,6 +840,8 @@ elif page == "Чат":
             st .session_state .chat_sessions[st .session_state .current_session]["messages"].append(
                 user_message)
 
+            st .session_state .session_manager .auto_save_session()
+
             with st .chat_message("user"):
                 st .markdown(prompt)
 
@@ -893,7 +877,8 @@ elif page == "Чат":
                 st .write_stream(stream_response())
 
                 with st .expander("Копировать текст", expanded=False):
-                    clean_text = markdown_to_text(full_response)
+                    clean_text = st .session_state .rag_pipeline .markdown_to_text(
+                        full_response)
                     st .text(clean_text)
 
                 metadata = {
@@ -904,21 +889,67 @@ elif page == "Чат":
 
                 if st .session_state .debug_mode:
                     metadata["debug_info"] = response
-                    with st .expander("Источники", expanded=False):
+
+                    with st .expander("Обработка запроса", expanded=False):
+
+                        query_analysis = response .get("query_analysis", {})
+                        if query_analysis:
+                            st .caption("**Предобработка запроса:**")
+                            st .caption(
+                                f"• Исходный запрос: {query_analysis .get('original_query', prompt)}")
+                            if query_analysis .get('corrected_query') != query_analysis .get('original_query'):
+                                st .caption(
+                                    f"• Исправленный запрос: {query_analysis .get('corrected_query', 'нет изменений')}")
+                            if query_analysis .get('expanded_queries'):
+                                st .caption(
+                                    f"• Расширенные запросы: {len(query_analysis .get('expanded_queries', []))} вариантов")
+                            st .caption(
+                                f"• Язык: {query_analysis .get('language', 'неизвестен')}")
+                            st .caption(
+                                f"• Тип запроса: {query_analysis .get('query_type', 'неизвестен')}")
+                            if query_analysis .get('keywords'):
+                                st .caption(
+                                    f"• Ключевые слова: {','.join(query_analysis .get('keywords', []))}")
+
+                        routing_result = response .get("routing_result", {})
+                        if routing_result:
+                            st .caption("")
+                            st .caption("**Решение маршрутизатора:**")
+                            can_answer = routing_result .get(
+                                "can_answer", False)
+                            confidence = routing_result .get("confidence", 0)
+                            num_sources = routing_result .get("num_sources", 0)
+
+                            st .caption(
+                                f"• Может ответить: {'Да'if can_answer else 'Нет'}")
+                            st .caption(f"• Уверенность: {confidence:.3f}")
+                            st .caption(
+                                f"• Порог уверенности: {st .session_state .session_manager .get_setting('confidence_threshold', 0.5)}")
+                            st .caption(
+                                f"• Количество источников: {num_sources}")
+                            st .caption(
+                                f"• Обоснование: {routing_result .get('reasoning', 'не указано')}")
+
+                    with st .expander("Результаты поиска", expanded=False):
+
                         if response .get("sources"):
+                            st .caption("**Использованные источники:**")
                             for source in response["sources"]:
                                 st .caption(
-                                    f"• {source['filename']} (релевантность: {source['relevance']:.2f})")
+                                    f"• {source['filename']} (релевантность: {source['relevance']:.3f})")
 
                         if response .get("search_results"):
                             pages_info = {}
                             fragment_counts = {}
+                            distances = []
 
                             for result in response["search_results"]:
                                 filename = result .get("metadata", {}).get(
                                     "filename", "Unknown")
                                 page = result .get("metadata", {}).get(
                                     "source_page", "Unknown")
+                                distance = result .get("distance", 1.0)
+                                distances .append(distance)
 
                                 if filename not in pages_info:
                                     pages_info[filename] = set()
@@ -929,7 +960,8 @@ elif page == "Чат":
                                 fragment_counts[filename] += 1
 
                             if pages_info:
-                                st .caption("**Страницы и фрагменты:**")
+                                st .caption("")
+                                st .caption("**Детали по документам:**")
                                 for filename, pages in pages_info .items():
                                     pages_str = ",".join(
                                         sorted(pages))if pages else "не указаны"
@@ -938,56 +970,61 @@ elif page == "Чат":
                                     st .caption(
                                         f"• {filename}: стр. {pages_str} ({fragments} фрагментов)")
 
-                    with st .expander("Анализ запроса", expanded=False):
-                        query_analysis = response .get("query_analysis", {})
-                        routing_result = response .get("routing_result", {})
-
-                        if query_analysis:
-                            lang = query_analysis .get(
-                                "language", "неизвестен")
-                            query_type = query_analysis .get(
-                                "query_type", "неизвестен")
-                            keywords = query_analysis .get("keywords", [])
-
-                            st .caption(f"**Язык:** {lang}")
-                            st .caption(f"**Тип запроса:** {query_type}")
-                            if keywords:
+                            if distances:
                                 st .caption(
-                                    f"**Ключевые слова:** {','.join(keywords)}")
+                                    f"• Расстояния - мин: {min(distances):.3f}, средн: {sum(distances)/len(distances):.3f}")
 
-                        if routing_result:
-                            reasoning = routing_result .get(
-                                "reasoning", "не указано")
-                            confidence = routing_result .get("confidence", 0)
-                            can_answer = routing_result .get(
-                                "can_answer", False)
+                        context_relevance = response .get("context_relevance")
+                        confidence_assessment = response .get(
+                            "confidence_assessment")
+                        if context_relevance or confidence_assessment:
+                            st .caption("")
+                            st .caption("**Оценки качества (2024):**")
 
+                        if context_relevance:
                             st .caption(
-                                f"**Решение:** {'может ответить'if can_answer else 'не может ответить'}")
-                            st .caption(f"**Уверенность:** {confidence:.2f}")
-                            st .caption(f"**Обоснование:** {reasoning}")
+                                f"• Релевантность контекста: {context_relevance .get('overall_score', 'н/д')}")
+                            st .caption(
+                                f"• Полезных/всего предложений: {context_relevance .get('useful_sentences', 'н/д')}/{context_relevance .get('total_sentences', 'н/д')}")
 
-                    with st .expander("Производительность", expanded=False):
+                        if confidence_assessment:
+                            st .caption(
+                                f"• Уверенность в ответе: {confidence_assessment .get('confidence_score', 'н/д')}")
+                            st .caption(
+                                f"• Обоснование: {confidence_assessment .get('reasoning', 'н/д')}")
+                            uncertainties = confidence_assessment .get(
+                                'uncertainty_indicators', [])
+                            if uncertainties:
+                                st .caption(
+                                    f"• Индикаторы неуверенности: {','.join(uncertainties)}")
+
+                    with st .expander("Системная информация", expanded=False):
+
                         time_resp = response .get("response_time", 0)
                         type_resp = response .get("response_type", "unknown")
-                        st .caption(
-                            f"**Время и тип ответа:** {time_resp:.2f}с, тип: {type_resp}")
-
                         search_results = response .get("search_results", [])
                         sources_count = len(response .get("sources", []))
+
+                        st .caption("**Производительность:**")
+                        st .caption(f"• Время ответа: {time_resp:.3f}с")
+                        st .caption(f"• Тип ответа: {type_resp}")
                         st .caption(
-                            f"**Результаты поиска:** найдено: {len(search_results)}, использовано: {sources_count}")
+                            f"• Поиск: найдено {len(search_results)}, использовано {sources_count}")
 
-                        if search_results:
-                            similarities = [
-                                r .get("similarity", 0)for r in search_results if "similarity" in r]
-                            if similarities:
-                                avg_sim = sum(similarities)/len(similarities)
-                                max_sim = max(similarities)
-                                st .caption(
-                                    f"**Показатели схожести:** средняя: {avg_sim:.2f}, макс: {max_sim:.2f}")
+                        search_settings = {
+                            'search_method': st .session_state .session_manager .get_setting('search_method', 'mmr'),
+                            'search_k': st .session_state .session_manager .get_setting('search_k', 10),
+                            'distance_threshold': st .session_state .session_manager .get_setting('distance_threshold', 0.5),
+                            'temperature': st .session_state .session_manager .get_setting('temperature', 0.5),
+                            'max_tokens': st .session_state .session_manager .get_setting('max_tokens', 2000)
+                        }
+                        st .caption("")
+                        st .caption("**Настройки системы:**")
+                        for key, value in search_settings .items():
+                            st .caption(f"• {key}: {value}")
 
-                    with st .expander("Отладка", expanded=False):
+                        st .caption("")
+                        st .caption("**Полные технические данные:**")
                         st .json(response)
 
             assistant_message = {
@@ -997,6 +1034,8 @@ elif page == "Чат":
             }
             st .session_state .chat_sessions[st .session_state .current_session]["messages"].append(
                 assistant_message)
+
+            st .session_state .session_manager .auto_save_session()
 
             conversation_entry = {
                 "timestamp": datetime .now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1013,8 +1052,11 @@ elif page == "Настройки":
     if not st .session_state .system_initialized:
         st .error("Система не инициализирована.")
     else:
-        tab1, tab2, tab3 = st .tabs(["Параметры", "Данные", "Система"])
+        tab1, tab2 = st .tabs(["Система", "Параметры"])
         with tab1:
+            status = st .session_state .rag_pipeline .get_system_status()
+            current_config = st .session_state .rag_pipeline .config_manager .get_current_config()
+            available_models = st .session_state .rag_pipeline .config_manager .get_available_models()
 
             st .markdown("### Выбор моделей")
             available_models = st .session_state .rag_pipeline .config_manager .get_available_models()
@@ -1072,6 +1114,44 @@ elif page == "Настройки":
                 time .sleep(1)
                 st .rerun()
 
+            st .markdown("### Системные промпты")
+            system_prompt_styles = st .session_state .session_manager .get_system_prompts()
+            current_style = st .session_state .session_manager .get_setting(
+                'system_prompt_style', 'Профессиональный')
+
+            style_options = {
+                "Профессиональный": "Профессиональный",
+                "Академический": "Академический",
+                "Дружелюбный": "Дружелюбный",
+                "Краткий": "Краткий",
+                "Подробный": "Подробный",
+                "Формальный": "Формальный",
+                "Объясняющий": "Объясняющий",
+                "Технический": "Технический",
+                "Креативный": "Креативный"
+            }
+
+            reverse_mapping = {v: k for k, v in style_options .items()}
+            current_display = reverse_mapping .get(
+                current_style, "Профессиональный")
+            current_index = list(style_options .keys()).index(current_display)
+
+            selected_display = st .selectbox(
+                "Выберите стиль общения",
+                options=list(style_options .keys()),
+                index=current_index,
+                help="Стиль влияет на манеру ответов ассистента"
+            )
+
+            selected_style = style_options[selected_display]
+            if selected_style != current_style:
+                st .session_state .session_manager .set_setting(
+                    'system_prompt_style', selected_style)
+                st .success(f"Стиль обновлен: {selected_style}")
+
+            st .info(
+                f"**{selected_style}**: {system_prompt_styles[selected_style]}")
+
             st .markdown("### Добавить новые модели")
             st .markdown("Для добавления новых моделей используйте:")
             st .code("ollama pull <model_name>", language="bash")
@@ -1122,44 +1202,39 @@ elif page == "Настройки":
                 for m in emb:
                     st .markdown(f"- {m}")
 
-            st .markdown("### Системные промпты")
-            system_prompt_styles = st .session_state .session_manager .get_system_prompts()
-            current_style = st .session_state .session_manager .get_setting(
-                'system_prompt_style', 'Профессиональный')
+            st .markdown("### Экспорт данных")
+            if st .button("Экспортировать историю", help="Скачать все разговоры в текстовом формате"):
+                if st .session_state .conversation_history:
+                    export_text = st .session_state .rag_pipeline .export_conversation(
+                        st .session_state .conversation_history
+                    )
+                    st .download_button(
+                        label="Скачать историю",
+                        data=export_text,
+                        file_name=f"rag_history_{datetime .now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                else:
+                    st .info("История разговоров пуста")
 
-            style_options = {
-                "Профессиональный": "Профессиональный",
-                "Академический": "Академический",
-                "Дружелюбный": "Дружелюбный",
-                "Краткий": "Краткий",
-                "Подробный": "Подробный",
-                "Формальный": "Формальный",
-                "Объясняющий": "Объясняющий",
-                "Технический": "Технический",
-                "Креативный": "Креативный"
-            }
+            st .markdown("### Системные действия")
+            col1, col2 = st .columns(2)
+            with col1:
+                if st .button("Переинициализировать систему"):
+                    st .session_state .system_initialized = False
+                    st .session_state .rag_pipeline = RAGPipeline()
+                    st .success("Система переинициализирована")
+                    time .sleep(1)
+                    st .rerun()
+            with col2:
+                if st .button("Сбросить все настройки"):
+                    st .session_state .clear()
+                    st .success("Настройки сброшены")
+                    time .sleep(1)
+                    st .rerun()
 
-            reverse_mapping = {v: k for k, v in style_options .items()}
-            current_display = reverse_mapping .get(
-                current_style, "Профессиональный")
-            current_index = list(style_options .keys()).index(current_display)
-
-            selected_display = st .selectbox(
-                "Выберите стиль общения",
-                options=list(style_options .keys()),
-                index=current_index,
-                help="Стиль влияет на манеру ответов ассистента"
-            )
-
-            selected_style = style_options[selected_display]
-            if selected_style != current_style:
-                st .session_state .session_manager .set_setting(
-                    'system_prompt_style', selected_style)
-                st .success(f"Стиль обновлен: {selected_style}")
-
-            st .info(
-                f"**{selected_style}**: {system_prompt_styles[selected_style]}")
-
+        with tab2:
             st .markdown("### Обработка документов")
             col1, col2 = st .columns(2)
 
@@ -1252,14 +1327,14 @@ elif page == "Настройки":
             with col1:
                 distance_threshold = st .slider(
                     "Порог расстояния для поиска",
-                    min_value=0.2,
+                    min_value=0.1,
                     max_value=0.9,
                     value=st .session_state .session_manager .get_setting(
-                        'distance_threshold', 0.25),
+                        'distance_threshold', 0.5),
                     step=0.05,
                     help="Максимальное расстояние для включения результата в поиск"
                 )
-                if abs(distance_threshold - st .session_state .session_manager .get_setting('distance_threshold', 0.25)) > 0.01:
+                if abs(distance_threshold - st .session_state .session_manager .get_setting('distance_threshold', 0.5)) > 0.01:
                     st .session_state .session_manager .set_setting(
                         'distance_threshold', distance_threshold)
                     st .success(
@@ -1272,7 +1347,7 @@ elif page == "Настройки":
             with col2:
                 confidence_threshold = st .slider(
                     "Порог уверенности для ответов",
-                    min_value=0.3,
+                    min_value=0.1,
                     max_value=0.9,
                     value=st .session_state .session_manager .get_setting(
                         'confidence_threshold', 0.5),
@@ -1298,11 +1373,11 @@ elif page == "Настройки":
                     min_value=0.0,
                     max_value=1.0,
                     value=st .session_state .session_manager .get_setting(
-                        'temperature', 0.2),
+                        'temperature', 0.5),
                     step=0.1,
                     help="Более высокая температура = более креативные ответы"
                 )
-                if abs(temperature - st .session_state .session_manager .get_setting('temperature', 0.2)) > 0.01:
+                if abs(temperature - st .session_state .session_manager .get_setting('temperature', 0.5)) > 0.01:
                     st .session_state .session_manager .set_setting(
                         'temperature', temperature)
                     st .success(
@@ -1329,204 +1404,3 @@ elif page == "Настройки":
 
                 st .caption("Малое значение: короткие ответы")
                 st .caption("Большое значение: более развернутые ответы")
-
-        with tab2:
-
-            st .markdown("### Экспорт данных")
-            if st .button("Экспортировать историю", help="Скачать все разговоры в текстовом формате"):
-                if st .session_state .conversation_history:
-                    export_text = st .session_state .rag_pipeline .export_conversation(
-                        st .session_state .conversation_history
-                    )
-                    st .download_button(
-                        label="Скачать историю",
-                        data=export_text,
-                        file_name=f"rag_history_{datetime .now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        mime="text/plain",
-                        use_container_width=True
-                    )
-                else:
-                    st .info("История разговоров пуста")
-
-            st .markdown("### Управление сессиями")
-
-            col1, col2 = st .columns(2)
-
-            with col1:
-                session_name = st .text_input(
-                    "Название новой сессии",
-                    value=f"session_{datetime .now().strftime('%Y%m%d_%H%M')}",
-                    help="Имя для сохранения текущей сессии"
-                )
-
-                if st .button("Сохранить текущую сессию", type="primary", use_container_width=True):
-                    if session_name .strip():
-                        result = st .session_state .session_manager .save_session(
-                            session_name .strip())
-                        if result["success"]:
-                            st .success(
-                                f"Сессия сохранена: {result['session_name']}")
-                        else:
-                            st .error(f"Ошибка сохранения: {result['error']}")
-                    else:
-                        st .error("Введите название сессии")
-
-                st .caption("Сохраняет все настройки и историю разговоров")
-
-            with col2:
-
-                session_info = st .session_state .session_manager .get_session_info()
-
-                st .info(f"""
-                **Тип сессии:** {session_info["session_type"].upper()}
-                
-                **Настроек загружено:** {session_info['initialized_settings']}/{session_info['total_settings']}
-                
-                **Валидных настроек:** {session_info["valid_settings"]}
-                
-                **Сообщений в истории:** {len(st .session_state .conversation_history)if st .session_state .conversation_history else 0}
-                """)
-
-            saved_sessions = st .session_state .session_manager .get_saved_sessions()
-
-            if saved_sessions:
-                st .markdown("### Сохраненные сессии")
-
-                for session in saved_sessions:
-                    with st .expander(f"{session['name']}", expanded=False):
-                        col1, col2, col3 = st .columns([2, 1, 1])
-
-                        with col1:
-                            st .write(
-                                f"**Создана:** {session['created_at'][:19].replace('T', '')}")
-                            st .write(
-                                f"**Сообщений:** {session['conversation_count']}")
-                            st .write(f"**ID:** {session['id'][:8]}...")
-                            st .write(f"**Версия:** {session['version']}")
-
-                        with col2:
-                            if st .button("Загрузить", key=f"load_{session['filename']}", type="secondary", use_container_width=True):
-                                session_file_name = session['filename'].replace(
-                                    '.json', '')
-                                result = st .session_state .session_manager .load_session(
-                                    session_file_name)
-                                if result["success"]:
-                                    st .success(
-                                        f"Сессия загружена: {session['name']}")
-                                    st .info(
-                                        f"Восстановлено {result['loaded_settings']} настроек и {result['conversation_count']} сообщений")
-                                else:
-                                    st .error(
-                                        f"Ошибка загрузки: {result['error']}")
-
-                        with col3:
-                            if st .button("Удалить", key=f"delete_{session['filename']}", type="secondary", use_container_width=True):
-                                session_file_name = session['filename'].replace(
-                                    '.json', '')
-                                if st .session_state .session_manager .delete_session(session_file_name):
-                                    st .success(
-                                        f"Сессия удалена: {session['name']}")
-                                else:
-                                    st .error("Ошибка удаления сессии")
-
-            st .markdown("### Действия с сессией")
-            col1, col2 = st .columns(2)
-
-            with col1:
-                if st .button("Очистить историю разговоров", type="secondary", use_container_width=True):
-                    st .session_state .conversation_history = []
-                    st .success("История разговоров очищена")
-                st .caption("Удаляет только историю, настройки остаются")
-
-            with col2:
-                if st .button("Сбросить все настройки", type="secondary", use_container_width=True):
-                    st .session_state .session_manager .reset_to_defaults()
-                    st .success("Настройки сброшены к значениям по умолчанию")
-                st .caption("Возвращает все параметры к исходным значениям")
-
-        with tab3:
-            status = st .session_state .rag_pipeline .get_system_status()
-            current_config = st .session_state .rag_pipeline .config_manager .get_current_config()
-            available_models = st .session_state .rag_pipeline .config_manager .get_available_models()
-
-            st .markdown("### Конфигурация моделей")
-            llm_info = st .session_state .rag_pipeline .config_manager .get_model_info(
-                current_config .llm_model)
-            embed_info = st .session_state .rag_pipeline .config_manager .get_model_info(
-                current_config .embedding_model)
-
-            models_config = {
-                "llm_model": current_config .llm_model,
-                "llm_status": "Доступна"if current_config .llm_model in available_models['llm']else "Недоступна",
-                "llm_size": llm_info .get('size', 'N/A')if llm_info else 'N/A',
-                "embedding_model": current_config .embedding_model,
-                "embedding_status": "Доступна"if current_config .embedding_model in available_models['embedding']else "Недоступна",
-                "embedding_size": embed_info .get('size', 'N/A')if embed_info else 'N/A'
-            }
-            st .json(models_config)
-
-            if "session_manager" in st .session_state:
-                session_manager = st .session_state .session_manager
-                system_prompt_styles = session_manager .get_system_prompts()
-                current_style = session_manager .get_setting(
-                    'system_prompt_style', 'Профессиональный')
-
-                st .markdown("### Системные промпты")
-                prompts_config = {
-                    "current_style": current_style,
-                    "description": system_prompt_styles .get(current_style, "N/A"),
-                    "available_styles": list(system_prompt_styles .keys())
-                }
-                st .json(prompts_config)
-
-                st .markdown("### Обработка документов")
-                documents_config = {
-                    "chunk_size": session_manager .get_setting('chunk_size', 512),
-                    "chunk_overlap": session_manager .get_setting('chunk_overlap', 25),
-                    "applies_to": "новые документы при загрузке"
-                }
-                st .json(documents_config)
-
-                st .markdown("### Поиск информации")
-                search_config = {
-                    "search_method": session_manager .get_setting('search_method', 'mmr'),
-                    "search_k": session_manager .get_setting('search_k', 10),
-                    "available_methods": ["similarity", "mmr", "threshold"]
-                }
-                st .json(search_config)
-
-                st .markdown("### Контроль релевантности")
-                relevance_config = {
-                    "distance_threshold": session_manager .get_setting('distance_threshold', 0.25),
-                    "confidence_threshold": session_manager .get_setting('confidence_threshold', 0.5)
-                }
-                st .json(relevance_config)
-
-                st .markdown("### Генерация ответов")
-                generation_config = {
-                    "temperature": session_manager .get_setting('temperature', 0.2),
-                    "max_tokens": session_manager .get_setting('max_tokens', 2000),
-                    "system_prompt_style": session_manager .get_setting('system_prompt_style', 'Профессиональный')
-                }
-                st .json(generation_config)
-
-            st .markdown("### Векторная база данных")
-            st .json(status["vector_store"])
-            st .markdown("### Статистика пайплайна")
-            st .json(status["pipeline_stats"])
-
-            st .markdown("### Системные действия")
-            col1, col2 = st .columns(2)
-            with col1:
-                if st .button("Переинициализировать систему"):
-                    st .session_state .system_initialized = False
-                    st .session_state .rag_pipeline = RAGPipeline()
-                    st .success("Система переинициализирована")
-                    time .sleep(1)
-                    st .rerun()
-            with col2:
-                if st .button("Сбросить все настройки"):
-                    st .session_state .clear()
-                    st .success("Настройки сброшены")
-                    time .sleep(1)
-                    st .rerun()

@@ -1,6 +1,7 @@
 from typing import Dict, Any, List, Optional
 import streamlit as st
 import time
+import re
 import markdown
 from bs4 import BeautifulSoup
 from .document_processor import DocumentProcessor
@@ -32,6 +33,7 @@ class RAGPipeline:
             progress_tracker=progress_tracker
         )
         self .llm_manager = LLMManager(model_name=config .llm_model)
+
         self .router = SmartRouter(self .llm_manager, self .vector_store)
         self .stats = {
             "total_queries": 0,
@@ -319,6 +321,9 @@ class RAGPipeline:
         start_time = time .time()
 
         try:
+
+            self .router .update_confidence_threshold(confidence_threshold)
+
             search_results = self .vector_store .search_similar(
                 query,
                 k=search_k,
@@ -335,12 +340,20 @@ class RAGPipeline:
                     query
                 )
 
+                context_relevance = self .llm_manager .evaluate_context_relevance(
+                    query, enhanced_context
+                )
+
                 answer = self .llm_manager .generate_response(
                     prompt=query,
                     context=enhanced_context,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     system_prompt_style=system_prompt_style
+                )
+
+                confidence_assessment = self .llm_manager .assess_confidence(
+                    query, enhanced_context, answer
                 )
 
                 response_type = "success"
@@ -380,6 +393,11 @@ class RAGPipeline:
                 "sources": self ._extract_sources(search_results)
             }
 
+            if 'context_relevance' in locals():
+                complete_response["context_relevance"] = context_relevance
+            if 'confidence_assessment' in locals():
+                complete_response["confidence_assessment"] = confidence_assessment
+
             return complete_response
 
         except Exception as e:
@@ -396,7 +414,7 @@ class RAGPipeline:
         confidence = routing_result .get("confidence", 0.0)
 
         if language == "russian":
-            return f"""Извините, в загруженных документах недостаточно информации для полного ответа на ваш вопрос (уверенность: {confidence:.2f}).
+            return f"""Извините, в загруженных документах недостаточно информации для полного ответа на ваш вопрос.
 
 Возможные варианты:
 1. Переформулировать вопрос
@@ -405,7 +423,7 @@ class RAGPipeline:
 
 Попробую дать частичный ответ на основе найденной информации..."""
         else:
-            return f"""Sorry, there's insufficient information in the loaded documents to fully answer your question (confidence: {confidence:.2f}).
+            return f"""Sorry, there's insufficient information in the loaded documents to fully answer your question.
 
 Possible options:
 1. Rephrase the question
@@ -467,11 +485,33 @@ I'll try to provide a partial answer based on the available information..."""
             st .error(f"Ошибка очистки данных: {str(e)}")
             return False
 
-    def _markdown_to_text(self, markdown_text: str) -> str:
+    def markdown_to_text(self, markdown_text: str) -> str:
+        """Убирает Markdown-разметку для вывода чистого текста в интерфейсе"""
         try:
-            html = markdown .markdown(markdown_text)
-            soup = BeautifulSoup(html, 'html.parser')
-            return soup .get_text()
+            text = markdown_text
+
+            text = re .sub(r'^#{1,6}\s+', '', text, flags=re .MULTILINE)
+
+            text = re .sub(r'\*\*(.*?)\*\*', r'\1', text)
+            text = re .sub(r'__(.*?)__', r'\1', text)
+
+            text = re .sub(r'\*(.*?)\*', r'\1', text)
+            text = re .sub(r'_(.*?)_', r'\1', text)
+
+            text = re .sub(r'^\s*[-*+]\s+', '', text, flags=re .MULTILINE)
+            text = re .sub(r'^\s*\d+\.\s+', '', text, flags=re .MULTILINE)
+
+            text = re .sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+            text = re .sub(r'`([^`]+)`', r'\1', text)
+
+            text = re .sub(
+                r'```[^`]*```', lambda m: m .group(0).replace('```', '').strip(), text, flags=re .DOTALL)
+
+            text = re .sub(r'^---+$', '', text, flags=re .MULTILINE)
+
+            return text
+
         except Exception:
             return markdown_text
 
@@ -483,7 +523,7 @@ I'll try to provide a partial answer based on the available information..."""
             export_text += f"Вопрос: {entry .get('question', 'N/A')}\n\n"
 
             answer = entry .get('answer', 'N/A')
-            clean_answer = self ._markdown_to_text(answer)
+            clean_answer = self .markdown_to_text(answer)
             export_text += f"Ответ: {clean_answer}\n\n\n"
 
         return export_text

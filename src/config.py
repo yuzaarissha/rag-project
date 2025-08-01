@@ -85,14 +85,14 @@ class ConfigManager:
             embedding_models = []
 
             embedding_keywords = [
-                'embed', 'embedding', 'nomic', 'mxbai', 'bge-m3', 'all-minilm',
-                'snowflake-arctic-embed', 'sentence-transformers', 'e5-', 'gte-'
+                'embed', 'embedding', 'nomic', 'mxbai', 'bge', 'minilm', 'snowflake',
+                'arctic', 'paraphrase', 'granite', 'sentence-transformers', 'e5-', 'gte-'
             ]
 
             llm_keywords = [
-                'llama', 'qwen', 'phi', 'gemma', 'mistral', 'codellama', 'deepseek',
-                'llava', 'vicuna', 'orca', 'wizardlm', 'falcon', 'gpt', 'claude',
-                'chat', 'instruct', 'code', 'math'
+                'llama', 'qwen', 'qwq', 'phi', 'gemma', 'mistral', 'mixtral', 'codellama', 'deepseek',
+                'openthinker', 'llava', 'vicuna', 'orca', 'wizardlm', 'falcon', 'gpt', 'claude', 'chat',
+                'instruct', 'code', 'math', 'minicpm', 'dolphin', 'olmo', 'smollm', 'starcoder'
             ]
 
             for model_name in model_names:

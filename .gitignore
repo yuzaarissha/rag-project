@@ -22,7 +22,7 @@ venv.bak/
 # Data directories
 data/documents/
 data/chroma_db/
-data/sessions/
+data/saves/
 temp_*
 uploads/
 cache/
