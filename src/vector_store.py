@@ -12,7 +12,7 @@ from .document_processor import SimpleProgressTracker, ProcessingStage
 
 
 class VectorStore:
-    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "nomic-embed-text:latest", progress_tracker: Optional[SimpleProgressTracker] = None):
+    def __init__(self, collection_name: str = "rag_documents", persist_directory: str = "./data/chroma_db", embedding_model: str = "qwen3-embedding:latest", progress_tracker: Optional[SimpleProgressTracker] = None):
         self .base_collection_name = collection_name
         self .persist_directory = os .path .abspath(persist_directory)
         self .embedding_model = embedding_model
